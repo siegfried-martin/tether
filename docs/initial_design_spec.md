@@ -257,7 +257,7 @@ Assignment is sticky: a group keeps the hub event its members already point to. 
 
 ### Work calendar content
 
-Publish a work Outlook calendar at "titles and locations". The work calendar then contributes no description text to the hub, and you join meetings from Outlook as before.
+Publish the work calendar with all details. Descriptions, including Teams join links, pass into the hub under the usual merge rule, so meetings can be joined straight from the hub calendar. The cost is that work meeting text lands in a personal Google calendar. That is an accepted trade, made for usability. If you want less, publish at "Can view titles and locations" instead; no code change is needed.
 
 ### Getting an Outlook ICS URL
 
@@ -265,7 +265,7 @@ Done by hand once, on a machine signed in to the work account:
 
 1. Open Outlook on the web and select the Settings gear.
 2. Go to Calendar, then Shared calendars.
-3. Under "Publish a calendar", pick the main calendar and the permission "Can view titles and locations".
+3. Under "Publish a calendar", pick the main calendar and the permission "Can view all details".
 4. Select Publish. Two links appear: HTML and ICS.
 5. Copy the ICS link and put it in Tether's environment file as a secret. Do not commit it.
 
@@ -281,7 +281,7 @@ What one published Exchange Online calendar actually returned. Build and test th
 - All TZIDs are Windows names, each with a VTIMEZONE block: Eastern, Central, Pacific, India, Pakistan and GTB Standard Time. 204 events are all-day (`VALUE=DATE`). There are no UTC or floating date-times.
 - Every event has `STATUS:CONFIRMED`. Free and busy status is only in `X-MICROSOFT-CDO-BUSYSTATUS`: 251 BUSY, 497 TENTATIVE, 416 FREE and 16 OOF. Unanswered invites arrive as TENTATIVE, so this field decides what counts as a real meeting.
 - There are no ATTENDEE or ORGANIZER lines.
-- That feed was published with full details, not titles and locations. 1,129 events carry a DESCRIPTION, median about 1.5 KB, most with Teams join links. See "Work calendar content" above.
+- It was published with all details. 1,129 events carry a DESCRIPTION, median about 1.5 KB, most with Teams join links.
 
 ## MCP tool surface
 
