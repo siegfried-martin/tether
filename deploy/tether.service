@@ -1,0 +1,26 @@
+# systemd unit for Tether. Installed by deploy/remote-install.sh.
+# Host, port and everything else come from the environment file.
+[Unit]
+Description=Tether (inbox, tasks, calendar hub; Claude MCP connector)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tether
+Group=tether
+WorkingDirectory=/var/lib/tether
+EnvironmentFile=/etc/tether/tether.env
+# `serve` always runs exactly one worker (spec: one-worker rule).
+ExecStart=/opt/tether/.venv/bin/python -m tether serve
+Restart=on-failure
+RestartSec=5
+# Files the service creates (DB, WAL) are readable only by tether.
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/tether
+
+[Install]
+WantedBy=multi-user.target

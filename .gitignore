@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets and data: never committed
+.env
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Deploy build output
+build/
+
+# Local notes and handoffs: never committed
+docs/context/
