@@ -301,8 +301,12 @@ The MCP endpoint is never an unauthenticated URL. Claude's connector cannot use 
 
 - MCP is served over streamable HTTP by the same process.
 - Auth follows the MCP authorization spec. Tether is the OAuth authorization server: protected-resource and authorization-server metadata, PKCE, and the client registration Claude's connector requires.
-- The authorize step is Google sign-in, restricted to the owner's address (`TETHER_OWNER_EMAIL`). Tether then issues its own access and refresh tokens bound to that identity. Google tokens never leave the server.
-- This is a named work item at the start of phase 4. The flow is proven end to end against Claude's connector, using a stub server with one tool, before any real tool is built on it.
+- The authorize step is Google sign-in, restricted to the owner's address (`TETHER_OWNER_EMAIL`), followed by a consent page naming the client and where it will return. Tether then issues its own access and refresh tokens bound to that identity. Google tokens never leave the server.
+- Built on the MCP Python SDK's authorization-server routes: `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`, `/register` (dynamic client registration), `/authorize`, `/token` and `/revoke`. Tether supplies the storage and the consent step.
+- Registered redirect URIs are limited to `TETHER_MCP_REDIRECT_HOSTS`: Claude's hosts over HTTPS, plus loopback for Claude Code. A stranger cannot register a client that sends codes elsewhere.
+- Tokens are bound to the resource `<TETHER_BASE_URL>/mcp` and stored only as SHA-256 hashes. Access tokens last one hour. Refresh tokens last 30 days, sliding, and rotate on every use, so a used refresh token is refused. Codes are single-use and last five minutes. Revoking any token revokes its whole grant.
+- Transport is stateless streamable HTTP with JSON responses, so a restart drops no sessions. Host-header checks accept only the base URL's host.
+- This is a named work item at the start of phase 4. The flow is proven end to end against Claude's connector, using one real read-only tool (`sync_status`), before the rest of the tool surface is built on it.
 
 ## Mail search and reading
 
@@ -414,4 +418,5 @@ From the design review:
 
 - The repo describes a generic tool. Deployment values (public URL, port, deploy target) come from environment files; the repo carries templates and `.env.example` files only.
 - `python -m tether serve` is the one entry point and always runs one worker.
+- MCP auth as built: SDK authorization-server routes, owner consent page, redirect-host allowlist, hashed and rotating tokens.
 - The manual mail account kind is `digest`. The digest's time zone is configurable (`TETHER_TIMEZONE`, built with the digest in phase 4).

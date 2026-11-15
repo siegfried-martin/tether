@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # Google account ID ("sub") of the owner. When set, login must match it too.
     owner_sub: str | None = None
 
+    # Hosts allowed as OAuth redirect targets for the MCP connector: Claude's
+    # callbacks, plus loopback for Claude Code. Comma-separated.
+    mcp_redirect_hosts: str = "claude.ai,claude.com,localhost,127.0.0.1"
+
     initial_sync_days: int = 14
     gmail_poll_seconds: int = 60
 

@@ -6,14 +6,18 @@ Start it with `python -m tether serve`, which always runs exactly one worker
 
 import asyncio
 import contextlib
+import html
 import logging
 import secrets
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import Form
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from mcp.server.auth.provider import construct_redirect_uri
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,6 +27,8 @@ from tether.config import Settings, get_settings
 from tether.connectors import google_oauth
 from tether.connectors.google_oauth import AuthError
 from tether.crypto import Vault
+from tether.mcp_server import server as mcp
+from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import GmailPoller
 from tether.services import accounts, items, sync_state
 
@@ -43,7 +49,8 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         app.state.gmail = GmailPoller(app.state.conn, app.state.vault, app.state.http, settings)
         tasks = [asyncio.create_task(app.state.gmail.run_forever())] if start_pollers else []
         try:
-            yield
+            async with mcp_server.session_manager.run():
+                yield
         finally:
             for task in tasks:
                 task.cancel()
@@ -52,6 +59,9 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     app = FastAPI(title="Tether", lifespan=lifespan)
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=settings.secure_cookies,
                        same_site="lax", max_age=60 * 60 * 24 * 30)
+    # MCP endpoint and its OAuth server (metadata, /register, /authorize, /token, /revoke).
+    mcp_server, mcp_provider, mcp_app = mcp.build(settings, lambda: app.state.conn)
+    app.add_middleware(mcp.MCPRouter, mcp_app=mcp_app)
 
     # Dependencies are async so FastAPI runs them on the loop thread, not a threadpool.
     async def conn_dep(request: Request) -> sqlite3.Connection:
@@ -115,7 +125,10 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             if not settings.owner_sub:
                 log.warning("TETHER_OWNER_SUB is unset; pin login by setting it to %s", identity.sub)
             request.session["user"] = identity.email
-            return RedirectResponse("/", status_code=303)
+            dest = request.session.pop("after_login", "/")
+            if not dest.startswith("/") or dest.startswith("//"):
+                dest = "/"
+            return RedirectResponse(dest, status_code=303)
 
         # purpose == "connect": a mailbox. Requires a signed-in owner.
         if not request.session.get("user"):
@@ -130,6 +143,37 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             secret=google_oauth.secret_from_token_response(token, identity), scopes=granted)
         request.app.state.gmail.wake()
         return RedirectResponse("/settings", status_code=303)
+
+    # ---------------------------------------------------- MCP consent page
+
+    @app.get(CONSENT_PATH)
+    async def mcp_consent(request: Request, req: str):
+        pending = mcp_provider.consent.load(req)
+        if pending is None:
+            raise HTTPException(400, "this authorization request expired; start the connection again")
+        if not request.session.get("user"):
+            request.session["after_login"] = f"{CONSENT_PATH}?{request.url.query}"
+            return RedirectResponse("/auth/login", status_code=303)
+        csrf = secrets.token_urlsafe(24)
+        request.session["mcp_csrf"] = csrf
+        return HTMLResponse(_consent_page(pending, req, csrf, request.session["user"]))
+
+    @app.post(CONSENT_PATH)
+    async def mcp_consent_decision(request: Request, req: str = Form(...), csrf: str = Form(...),
+                                   decision: str = Form(...)):
+        user = request.session.get("user")
+        expected = request.session.pop("mcp_csrf", None)
+        if not user or not expected or not secrets.compare_digest(expected, csrf):
+            raise HTTPException(403, "consent check failed; start the connection again")
+        pending = mcp_provider.consent.load(req)
+        if pending is None:
+            raise HTTPException(400, "this authorization request expired; start the connection again")
+        if decision != "approve":
+            target = construct_redirect_uri(pending["redirect_uri"], error="access_denied", state=pending["state"])
+        else:
+            code = mcp_provider.approve(pending, subject=user)
+            target = construct_redirect_uri(pending["redirect_uri"], code=code, state=pending["state"])
+        return RedirectResponse(target, status_code=303)
 
     # ----------------------------------------------------------------- api
 
@@ -192,7 +236,7 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str):
-            if path.startswith(("api/", "auth/", "accounts/")):
+            if path.startswith(("api/", "auth/", "accounts/", ".well-known/")):
                 raise HTTPException(404)
             candidate = (static_dir / path).resolve()
             if path and candidate.is_file() and candidate.is_relative_to(static_dir.resolve()):
@@ -200,6 +244,33 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             return FileResponse(static_dir / "index.html")
 
     return app
+
+
+def _consent_page(pending: dict, req: str, csrf: str, user: str) -> str:
+    client = html.escape(pending["client_name"] or "An MCP client")
+    dest = html.escape(urlparse(pending["redirect_uri"]).netloc)
+    e = html.escape
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tether · Connect {client}</title>
+<style>
+  :root {{ color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }}
+  body {{ max-width: 460px; margin: 0 auto; padding: 48px 16px; }}
+  h1 {{ font-size: 1.3rem; }} .muted {{ opacity: .7; font-size: .9rem; }}
+  form {{ display: flex; gap: 12px; margin-top: 24px; }}
+  button {{ font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; }}
+  button[value=approve] {{ background: #1f2a44; color: #fff; border-color: #1f2a44; }}
+</style></head><body>
+<h1>Allow {client} to use Tether?</h1>
+<p>It will be able to read your inbox items, mail, tasks and calendar in Tether, and change tasks and
+items on your behalf.</p>
+<p class="muted">Signed in as {e(user)}. After you choose, you'll return to <strong>{dest}</strong>.</p>
+<form method="post" action="{CONSENT_PATH}">
+  <input type="hidden" name="req" value="{e(req)}"><input type="hidden" name="csrf" value="{e(csrf)}">
+  <button name="decision" value="approve">Allow</button>
+  <button name="decision" value="deny">Deny</button>
+</form>
+</body></html>"""
 
 
 class RedactQueryStrings(logging.Filter):

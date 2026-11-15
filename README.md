@@ -42,6 +42,12 @@ Open `TETHER_BASE_URL` (http://localhost:8000 by default). For frontend work, al
 them. `python -m tether serve` always starts exactly one, so don't run uvicorn by hand with
 `--workers`.
 
+## Connect Claude
+
+In Claude, add a custom connector with the URL `<TETHER_BASE_URL>/mcp`. Claude registers itself,
+then sends you through Tether's Google sign-in and a consent page. Only the owner can approve.
+For Claude Code: `claude mcp add --transport http tether <TETHER_BASE_URL>/mcp`.
+
 ## Deploy
 
 Targets an Ubuntu server with Python 3.12+, nginx and certbot, reached over ssh with sudo.
