@@ -89,7 +89,8 @@ def item_states(conn: sqlite3.Connection, account_id: int) -> dict[str, str]:
 VIEW_SQL = """
     SELECT i.id, i.kind, i.title, i.sender, i.snippet, i.needed, i.url, i.last_activity_at,
            i.last_direction, i.state, i.archived_at, i.priority, i.due_at,
-           a.id AS account_id, a.label AS account, a.color AS account_color
+           a.id AS account_id, a.label AS account, a.color AS account_color,
+           (SELECT COUNT(*) FROM task t WHERE t.item_id = i.id AND t.status = 'open') AS open_tasks
     FROM item i JOIN account a ON a.id = i.account_id
 """
 

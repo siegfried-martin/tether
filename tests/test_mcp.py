@@ -107,7 +107,9 @@ def test_full_flow_then_tool_call(client, monkeypatch):
         "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}})
     assert init.status_code == 200, init.text
     tools = rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
-    assert {t["name"] for t in tools} == {"sync_status", "list_items", "archive_item", "unarchive_item"}
+    assert {t["name"] for t in tools} == {
+        "sync_status", "list_items", "archive_item", "unarchive_item", "get_overview", "list_tasks",
+        "create_task", "update_task", "complete_task", "search_mail", "get_thread"}
     called = rpc(client, tokens["access_token"], "tools/call", {"name": "sync_status", "arguments": {}})
     assert called.status_code == 200 and "error" not in called.json()
 
@@ -197,3 +199,27 @@ def test_inbox_tools(client, conn, fake_gmail, monkeypatch):
     assert fake_gmail.modifies == [("t1", (), ("INBOX",))]
     missing = call("archive_item", id=999)
     assert missing["isError"] and "no item 999" in missing["content"][0]["text"]
+
+
+def test_task_from_search_flow(client, conn, fake_gmail, monkeypatch):
+    import json
+    from conftest import msg
+    _, _, _, tokens = connect(client, monkeypatch)
+    client.app.state.gmail_clients = lambda account_id: fake_gmail
+    conn.execute("INSERT INTO account (kind, label, color, excluded_categories) VALUES ('gmail', 'me@x.com', '#000', '')")
+    fake_gmail.put("t9", msg("m", "t9", labels=["CATEGORY_PERSONAL"], subject="Contract renewal"))
+
+    def call(name, **args):
+        result = rpc(client, tokens["access_token"], "tools/call", {"name": name, "arguments": args}).json()["result"]
+        assert not result.get("isError"), result
+        return json.loads(result["content"][0]["text"])
+
+    [hit] = call("search_mail", query="contract")["results"]
+    assert hit["in_inbox"] is False and hit["item_id"] is None
+    task = call("create_task", title="Renew contract", thread={"account": hit["account"], "thread_id": hit["thread_id"]},
+                due_at="2026-11-20", priority="high")
+    assert task["item_title"] == "Contract renewal" and task["item_state"] == "archived"
+    assert call("update_task", id=task["id"], fields={"notes": "ask legal"})["notes"] == "ask legal"
+    assert call("complete_task", id=task["id"])["status"] == "done"
+    overview = call("get_overview")
+    assert overview["tasks"]["count"] == 0

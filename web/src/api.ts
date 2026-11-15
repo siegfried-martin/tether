@@ -15,14 +15,35 @@ export type Item = {
   account_id: number
   account: string
   account_color: string
+  open_tasks: number
   note?: string
+}
+
+export type Task = {
+  id: number
+  parent_id: number | null
+  title: string
+  notes: string | null
+  status: 'open' | 'done'
+  due_at: string | null
+  priority: 'high' | 'normal' | 'low' | null
+  sort_order: number
+  item_id: number | null
+  completed_at: string | null
+  item_title: string | null
+  item_url: string | null
+  item_state: 'open' | 'archived' | null
+  item_account: string | null
+  item_color: string | null
 }
 
 export type Alert = { kind: string; account: string; message: string }
 
 export type Overview = {
-  urgent: Alert[]
+  today: string
+  urgent: { alerts: Alert[]; tasks: Task[]; follow_ups: unknown[]; items: Item[] }
   inbox: { count: number; by_account: Record<string, number>; preview: Item[] }
+  tasks: { count: number }
 }
 
 export type SyncSettings = {
@@ -51,6 +72,7 @@ export async function get<T>(path: string): Promise<T> {
   const resp = await fetch(path, { credentials: 'same-origin' })
   if (resp.status === 401) throw new Unauthorized()
   if (!resp.ok) throw new Error(`${path}: ${resp.status}`)
+  if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>
 }
 
@@ -60,6 +82,10 @@ export function post<T = unknown>(path: string, body?: unknown): Promise<T> {
 
 export function patch<T>(path: string, body: unknown): Promise<T> {
   return send<T>('PATCH', path, body)
+}
+
+export function del(path: string): Promise<unknown> {
+  return send('DELETE', path)
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -74,5 +100,6 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
     const detail = await resp.json().then((j) => j.detail).catch(() => resp.statusText)
     throw new Error(typeof detail === 'string' ? detail : `${resp.status}`)
   }
+  if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>
 }

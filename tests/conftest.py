@@ -68,6 +68,23 @@ class FakeGmail:
         self.fetches.append(thread_id)
         return self.threads.get(thread_id)
 
+    async def get_thread_full(self, thread_id):
+        self.fetches.append(thread_id)
+        return self.threads.get(thread_id)
+
+    async def search_thread_ids(self, query, limit):
+        """'*' matches every thread; otherwise a case-insensitive subject substring."""
+        if query == "bad:query":
+            import httpx
+            req = httpx.Request("GET", "https://gmail.test/threads")
+            raise httpx.HTTPStatusError("bad query", request=req, response=httpx.Response(400, request=req))
+        hits = []
+        for tid, thread in self.threads.items():
+            subjects = [h["value"] for m in thread["messages"] for h in m["payload"]["headers"] if h["name"] == "Subject"]
+            if query == "*" or any(query.lower() in s.lower() for s in subjects):
+                hits.append((max(int(m["internalDate"]) for m in thread["messages"]), tid))
+        return [tid for _, tid in sorted(hits, reverse=True)][:limit]
+
     async def modify_thread(self, thread_id, *, add=(), remove=()):
         if self.fail_with:
             exc, self.fail_with = self.fail_with, None

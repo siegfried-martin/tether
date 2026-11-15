@@ -4,9 +4,12 @@ Secrets (the encryption key, OAuth client secret, session secret, later the
 ICS URL) live only here, never in the database or the repo.
 """
 
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,11 +42,28 @@ class Settings(BaseSettings):
     # callbacks, plus loopback for Claude Code. Comma-separated.
     mcp_redirect_hosts: str = "claude.ai,claude.com,localhost,127.0.0.1"
 
+    # The owner's time zone (IANA name). Decides what "today" means for due dates
+    # and the agenda, and how the work digest's times are read.
+    timezone: str = "UTC"
+
     initial_sync_days: int = 14
     gmail_poll_seconds: int = 60
 
     # Directory holding the built PWA (web/dist). Served at / when present.
     static_dir: Path = Path("web/dist")
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_zone(cls, value: str) -> str:
+        ZoneInfo(value)  # raises for an unknown zone name
+        return value
+
+    @property
+    def tz(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
+    def today(self) -> date:
+        return datetime.now(self.tz).date()
 
     @property
     def redirect_uri(self) -> str:

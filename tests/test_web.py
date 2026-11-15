@@ -78,16 +78,18 @@ def test_bad_state_rejected(client):
 
 def test_connect_mailbox_stores_encrypted_credential(client, conn, monkeypatch):
     login(client, monkeypatch)
-    token = {"id_token": id_token("me@gmail.com", sub="s2"), "access_token": "at", "refresh_token": "rt",
+    # A long marker: short strings like "rt" turn up in random base64 ciphertext by chance.
+    refresh = "refresh-token-plaintext-marker"
+    token = {"id_token": id_token("me@gmail.com", sub="s2"), "access_token": "at", "refresh_token": refresh,
              "expires_in": 3600, "scope": f"openid email {google_oauth.GMAIL_MODIFY}"}
     resp = _oauth_round_trip(client, monkeypatch, "/accounts/google/connect", token)
     assert resp.status_code == 303 and resp.headers["location"] == "/settings"
     [acct] = client.get("/api/accounts").json()
     assert acct["label"] == "me@gmail.com" and acct["kind"] == "gmail"
     raw = conn.execute("SELECT ciphertext FROM credential").fetchone()[0]
-    assert b"rt" not in raw, "refresh token must not be stored in clear"
+    assert refresh.encode() not in raw, "refresh token must not be stored in clear"
     secret = accounts.load_credential(conn, client.app.state.vault, acct["id"])
-    assert secret["refresh_token"] == "rt" and secret["email"] == "me@gmail.com"
+    assert secret["refresh_token"] == refresh and secret["email"] == "me@gmail.com"
     # Reconnecting the same mailbox updates, never duplicates.
     _oauth_round_trip(client, monkeypatch, "/accounts/google/connect", token)
     assert len(client.get("/api/accounts").json()) == 1
@@ -110,7 +112,7 @@ def test_items_and_overview(client, conn, monkeypatch):
     assert item["title"] == "Hi" and item["account_color"] == "#123"
     overview = client.get("/api/overview").json()
     assert overview["inbox"]["count"] == 1
-    assert overview["urgent"][0]["kind"] == "auth_error"
+    assert overview["urgent"]["alerts"][0]["kind"] == "auth_error"
 
 
 def test_sync_settings_api(client, conn, monkeypatch):

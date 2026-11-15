@@ -200,6 +200,8 @@ class GmailApi(Protocol):
     async def get_thread(self, thread_id: str) -> dict | None: ...
     async def list_history(self, start_history_id: str) -> tuple[list[dict], str]: ...
     async def modify_thread(self, thread_id: str, *, add: list[str] = (), remove: list[str] = ()) -> bool: ...
+    async def get_thread_full(self, thread_id: str) -> dict | None: ...
+    async def search_thread_ids(self, query: str, limit: int) -> list[str]: ...
 
 
 class GmailClient:
@@ -214,8 +216,11 @@ class GmailClient:
     MAX_RETRIES = 4      # quota refusals waited out per request before giving up for this poll
 
     def __init__(self, http: httpx.AsyncClient, conn: sqlite3.Connection, vault: Vault,
-                 account_id: int, client_id: str, client_secret: str, *, sleep=asyncio.sleep):
+                 account_id: int, client_id: str, client_secret: str, *, sleep=asyncio.sleep,
+                 min_interval: float | None = None):
         self.http, self.conn, self.vault = http, conn, vault
+        if min_interval is not None:
+            self.MIN_INTERVAL = min_interval
         self.account_id = account_id
         self.client_id, self.client_secret = client_id, client_secret
         self.secret = accounts.load_credential(conn, vault, account_id)
@@ -300,6 +305,20 @@ class GmailClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_thread_full(self, thread_id: str) -> dict | None:
+        """The whole thread including bodies. Callers must not store or log it."""
+        resp = await self._get(f"/threads/{thread_id}", {"format": "full"})
+        if resp.status_code in (400, 404):  # 400: malformed ID
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def search_thread_ids(self, query: str, limit: int) -> list[str]:
+        """One page of thread IDs matching a Gmail search, newest first."""
+        resp = await self._get("/threads", {"q": query, "maxResults": limit})
+        resp.raise_for_status()
+        return [t["id"] for t in resp.json().get("threads", [])]
+
     async def list_history(self, start_history_id: str) -> tuple[list[dict], str]:
         records, page, latest = [], None, start_history_id
         while True:
@@ -328,7 +347,13 @@ class GmailClient:
 
 
 class GmailClients:
-    """Builds a GmailClient per account for one-off writes (archive, unarchive)."""
+    """Builds a GmailClient per account for interactive calls (archive, search, read).
+
+    Interactive calls are short bursts, so they pace faster than the poller.
+    Gmail's quota errors are still waited out by the client.
+    """
+
+    MIN_INTERVAL = 0.1
 
     def __init__(self, http: httpx.AsyncClient, conn: sqlite3.Connection, vault: Vault,
                  client_id: str, client_secret: str):
@@ -336,7 +361,8 @@ class GmailClients:
         self.client_id, self.client_secret = client_id, client_secret
 
     def __call__(self, account_id: int) -> GmailClient:
-        return GmailClient(self.http, self.conn, self.vault, account_id, self.client_id, self.client_secret)
+        return GmailClient(self.http, self.conn, self.vault, account_id, self.client_id, self.client_secret,
+                           min_interval=self.MIN_INTERVAL)
 
 
 # --------------------------------------------------------------------------

@@ -31,7 +31,7 @@ from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import GmailPoller
-from tether.services import accounts, items, sync_state, triage
+from tether.services import accounts, items, mail, overview, sync_state, tasks, triage
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,37 @@ class SyncSettingsUpdate(BaseModel):
 
 class AccountUpdate(BaseModel):
     color: str
+
+
+class TaskCreate(BaseModel):
+    title: str
+    parent_id: int | None = None
+    item_id: int | None = None
+    notes: str | None = None
+    due_at: str | None = None
+    priority: str | None = None
+
+
+class TaskUpdate(BaseModel):
+    """Only the fields sent are changed; an explicit null clears one."""
+    title: str | None = None
+    notes: str | None = None
+    due_at: str | None = None
+    priority: str | None = None
+    sort_order: float | None = None
+    parent_id: int | None = None
+
+
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError)
+
+
+@contextlib.contextmanager
+def user_errors():
+    """Map service errors (whose messages are safe to show) to HTTP errors."""
+    try:
+        yield
+    except USER_ERRORS as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, start_pollers: bool = True) -> FastAPI:
@@ -197,10 +228,8 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         return items.list_items(conn, account=account, state=state, limit=limit)
 
     async def _triage(request: Request, action, item_id: int) -> dict:
-        try:
+        with user_errors():
             return await action(request.app.state.conn, request.app.state.gmail_clients, item_id)
-        except triage.TriageError as exc:
-            raise HTTPException(exc.status, str(exc)) from exc
 
     @app.post("/api/items/{item_id}/archive")
     async def archive_item(item_id: int, request: Request, _: str = Depends(require_user)):
@@ -256,11 +285,54 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         return sync_state.sync_status(conn)
 
     @app.get("/api/overview")
-    async def overview(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
-        counts = items.open_counts(conn)
-        return {"urgent": sync_state.source_alerts(conn),
-                "inbox": {"count": counts["total"], "by_account": counts["by_account"],
-                          "preview": items.list_items(conn, state="open", limit=5)}}
+    async def get_overview(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        return overview.get_overview(conn, settings.today())
+
+    # --------------------------------------------------------------- tasks
+
+    @app.get("/api/tasks")
+    async def list_tasks(status: str | None = "open", _: str = Depends(require_user),
+                         conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.list_tasks(conn, status=status)
+
+    @app.post("/api/tasks", status_code=201)
+    async def create_task(body: TaskCreate, _: str = Depends(require_user),
+                          conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.create_task(conn, **body.model_dump())
+
+    @app.patch("/api/tasks/{task_id}")
+    async def update_task(task_id: int, body: TaskUpdate, _: str = Depends(require_user),
+                          conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.update_task(conn, task_id, body.model_dump(exclude_unset=True))
+
+    @app.post("/api/tasks/{task_id}/complete")
+    async def complete_task(task_id: int, request: Request, _: str = Depends(require_user)):
+        with user_errors():
+            return await tasks.complete_task(request.app.state.conn, request.app.state.gmail_clients, task_id)
+
+    @app.post("/api/tasks/{task_id}/reopen")
+    async def reopen_task(task_id: int, _: str = Depends(require_user),
+                          conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.reopen_task(conn, task_id)
+
+    @app.delete("/api/tasks/{task_id}", status_code=204)
+    async def delete_task(task_id: int, _: str = Depends(require_user),
+                          conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            tasks.delete_task(conn, task_id)
+
+    # ---------------------------------------------------------------- mail
+
+    @app.get("/api/mail/search")
+    async def search_mail(q: str, request: Request, account: str | None = None, limit: int = mail.DEFAULT_LIMIT,
+                          _: str = Depends(require_user)):
+        with user_errors():
+            return await mail.search_mail(request.app.state.conn, request.app.state.gmail_clients, q,
+                                          account=account, limit=limit)
 
     # -------------------------------------------------------------- static
 

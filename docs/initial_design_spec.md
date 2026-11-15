@@ -78,6 +78,9 @@ Nine tables, single user, no tenancy. Each synced table has a natural key so eve
 - Completing a parent completes its open children.
 - Completing a task archives its linked item once no other open task links to that item.
 - For a digest item, archive is local only. Nothing is written back to the source mailbox.
+- Due dates are calendar dates (`YYYY-MM-DD`) in the owner's time zone (`TETHER_TIMEZONE`). That zone also decides what "today" means for the urgent strip.
+- Completion always stands. If archiving a linked item fails (Gmail unreachable, account needs reconnecting), the item stays open and the result carries a warning.
+- Reopening a subtask reopens its parent. The app can delete a task, together with its subtasks. The MCP tools cannot, in line with "nothing deletes".
 
 ### Stored content
 

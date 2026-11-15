@@ -1,17 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { get, patch, post, Unauthorized, type Account, type Item, type Overview, type SyncRow, type SyncSettings } from './api'
-
-const REFRESH_MS = 60_000
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return 'never'
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (diff < 60) return 'now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
+import { useEffect, useState } from 'react'
+import { get, patch, post, type Account, type Item, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
+import { errorText, relativeTime, ToastView, usePolling, useToast } from './shared'
+import { DueLabel, TasksPage } from './Tasks'
 
 function useRoute(): [string, (path: string) => void] {
   const [path, setPath] = useState(location.pathname)
@@ -45,11 +35,14 @@ export default function App() {
       <header className="bar">
         <a href="/" className="brand" onClick={(e) => { e.preventDefault(); navigate('/') }}>Tether</a>
         <nav>
-          <a href="/settings" className={path === '/settings' ? 'active' : ''}
-             onClick={(e) => { e.preventDefault(); navigate('/settings') }}>Settings</a>
+          {([['/', 'Inbox'], ['/tasks', 'Tasks'], ['/settings', 'Settings']] as const).map(([to, label]) => (
+            <a key={to} href={to} className={path === to ? 'active' : ''}
+               onClick={(e) => { e.preventDefault(); navigate(to) }}>{label}</a>
+          ))}
         </nav>
       </header>
-      {path === '/settings' ? <Settings onSignedOut={() => setMe(null)} /> : <Home />}
+      {path === '/settings' ? <Settings onSignedOut={() => setMe(null)} />
+        : path === '/tasks' ? <TasksPage /> : <Home />}
     </div>
   )
 }
@@ -63,29 +56,7 @@ function Login() {
   )
 }
 
-function usePolling<T>(path: string): { data: T | null; error: string | null; reload: () => void } {
-  const [data, setData] = useState<T | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const reload = useCallback(() => {
-    get<T>(path)
-      .then((d) => { setData(d); setError(null) })
-      .catch((e) => {
-        if (e instanceof Unauthorized) location.reload()
-        else setError(String(e.message ?? e))
-      })
-  }, [path])
-  useEffect(() => {
-    reload()
-    const timer = setInterval(reload, REFRESH_MS)
-    const onVisible = () => document.visibilityState === 'visible' && reload()
-    document.addEventListener('visibilitychange', onVisible)
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
-  }, [reload])
-  return { data, error, reload }
-}
-
 type Tab = 'open' | 'archived'
-type Toast = { text: string; error?: boolean; undo?: () => void }
 
 function Home() {
   const overview = usePolling<Overview>('/api/overview')
@@ -97,13 +68,7 @@ function Home() {
   const list = usePolling<Item[]>(`/api/items?${query}`)
   // Rows moved out of this view, hidden at once while the server catches up.
   const [moved, setMoved] = useState<Set<number>>(new Set())
-  const [toast, setToast] = useState<Toast | null>(null)
-
-  useEffect(() => {
-    if (!toast) return
-    const timer = setTimeout(() => setToast(null), toast.error ? 8000 : 6000)
-    return () => clearTimeout(timer)
-  }, [toast])
+  const [toast, setToast] = useToast()
 
   const refresh = () => { list.reload(); overview.reload() }
   const hide = (id: number, on: boolean) =>
@@ -121,7 +86,30 @@ function Home() {
       if (!undoable) hide(item.id, false)
     } catch (e) {
       hide(item.id, false)
-      setToast({ text: e instanceof Error ? e.message : String(e), error: true })
+      setToast({ text: errorText(e), error: true })
+    } finally {
+      refresh()
+    }
+  }
+
+  const makeTask = async (item: Item) => {
+    try {
+      await post<Task>('/api/tasks', { title: item.title, item_id: item.id })
+      setToast({ text: 'Added to Tasks. Completing it archives this email.' })
+    } catch (e) {
+      setToast({ text: errorText(e), error: true })
+    } finally {
+      refresh()
+    }
+  }
+
+  const completeTask = async (task: Task) => {
+    try {
+      const done = await post<Task & { warnings: string[] }>(`/api/tasks/${task.id}/complete`)
+      setToast(done.warnings.length ? { text: done.warnings.join(' '), error: true }
+        : { text: `Done: ${task.title}`, undo: () => { setToast(null); post(`/api/tasks/${task.id}/reopen`).then(refresh) } })
+    } catch (e) {
+      setToast({ text: errorText(e), error: true })
     } finally {
       refresh()
     }
@@ -134,13 +122,7 @@ function Home() {
 
   return (
     <main>
-      {overview.data && overview.data.urgent.length > 0 && (
-        <section className="urgent" aria-label="Urgent">
-          {overview.data.urgent.map((a) => (
-            <div key={`${a.kind}-${a.account}`} className="alert">{a.message}</div>
-          ))}
-        </section>
-      )}
+      {overview.data && <Urgent urgent={overview.data.urgent} onComplete={completeTask} />}
       <section>
         <div className="inbox-head">
           <div className="tabs" role="tablist">
@@ -169,18 +151,38 @@ function Home() {
         {shown?.length === 0 && <p className="muted">{tab === 'open' ? 'Nothing open.' : 'Nothing archived yet.'}</p>}
         <ul className="items">
           {shown?.map((item) => (
-            <ItemRow key={item.id} item={item}
+            <ItemRow key={item.id} item={item} onTask={() => makeTask(item)}
                      onAction={() => act(item, item.state === 'open' ? 'archive' : 'unarchive')} />
           ))}
         </ul>
       </section>
-      {toast && (
-        <div className={`toast${toast.error ? ' error-toast' : ''}`} role="status">
-          <span>{toast.text}</span>
-          {toast.undo && <button className="link" onClick={toast.undo}>Undo</button>}
-        </div>
-      )}
+      <ToastView toast={toast} />
     </main>
+  )
+}
+
+function Urgent({ urgent, onComplete }: { urgent: Overview['urgent']; onComplete: (t: Task) => void }) {
+  const empty = !urgent.alerts.length && !urgent.tasks.length && !urgent.items.length
+  if (empty) return null
+  return (
+    <section className="urgent" aria-label="Urgent">
+      {urgent.alerts.map((a) => <div key={`${a.kind}-${a.account}`} className="alert">{a.message}</div>)}
+      {urgent.tasks.map((t) => (
+        <div key={`t${t.id}`} className="urgent-row">
+          <input type="checkbox" className="check" aria-label={`Complete: ${t.title}`} onChange={() => onComplete(t)} />
+          <span className="grow">{t.title}</span>
+          <DueLabel due={t.due_at} />
+        </div>
+      ))}
+      {urgent.items.map((i) => (
+        <a key={`i${i.id}`} className="urgent-row" href={i.url ?? undefined} target="_blank" rel="noreferrer">
+          <span className="dot" style={{ background: i.account_color }} />
+          <span className="grow">{i.title}</span>
+          {i.priority === 'high' && <span className="flag">High</span>}
+          <DueLabel due={i.due_at} />
+        </a>
+      ))}
+    </section>
   )
 }
 
@@ -191,6 +193,12 @@ const ArchiveIcon = () => (
     <path d="M10 13h4" />
   </svg>
 )
+const TaskIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="3" /><path d="M8 12l3 3 5-6" />
+  </svg>
+)
 const InboxIcon = () => (
   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -198,12 +206,15 @@ const InboxIcon = () => (
   </svg>
 )
 
-function ItemRow({ item, onAction }: { item: Item; onAction: () => void }) {
+function ItemRow({ item, onAction, onTask }: { item: Item; onAction: () => void; onTask: () => void }) {
   const body = (
     <>
       <span className="swatch" style={{ background: item.account_color }} title={item.account} />
       <span className="item-main">
-        <span className="sender">{item.last_direction === 'out' ? '↗ ' : ''}{item.sender || item.account}</span>
+        <span className="sender">
+          {item.last_direction === 'out' ? '↗ ' : ''}{item.sender || item.account}
+          {item.open_tasks > 0 && <span className="task-badge" title="Has an open task">task</span>}
+        </span>
         <span className="subject">
           <span className="title">{item.title}</span>
           {item.snippet && <span className="snippet">{item.snippet}</span>}
@@ -217,6 +228,11 @@ function ItemRow({ item, onAction }: { item: Item; onAction: () => void }) {
     <li className="item-row">
       {item.url ? <a className="item" href={item.url} target="_blank" rel="noreferrer">{body}</a>
                 : <div className="item">{body}</div>}
+      {item.open_tasks === 0 && item.state === 'open' && (
+        <button className="row-action" onClick={onTask} title="Make a task" aria-label={`Make a task: ${item.title}`}>
+          <TaskIcon />
+        </button>
+      )}
       <button className="row-action" onClick={onAction}
               title={archive ? 'Archive' : 'Move to inbox'} aria-label={`${archive ? 'Archive' : 'Move to inbox'}: ${item.title}`}>
         {archive ? <ArchiveIcon /> : <InboxIcon />}

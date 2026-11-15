@@ -8,7 +8,9 @@ import sqlite3
 from collections.abc import Callable
 from urllib.parse import urlparse
 
-from typing import Literal
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import MCPServer
@@ -18,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tether.config import Settings
 from tether.mcp_server.provider import ConsentRequests, TetherOAuthProvider
-from tether.services import items, sync_state, triage
+from tether.services import items, mail, overview, sync_state, tasks, triage
 from tether.services.triage import GmailFactory
 
 MCP_PATH = "/mcp"
@@ -29,6 +31,15 @@ _PREFIXES = ("/.well-known/oauth-authorization-server", "/.well-known/oauth-prot
 
 def is_mcp_path(path: str) -> bool:
     return path in _EXACT or path.startswith(_PREFIXES)
+
+
+class ThreadRef(BaseModel):
+    """A Gmail thread from search_mail results."""
+    account: str = Field(description="Account label (mailbox address) from the search result")
+    thread_id: str
+
+
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError)
 
 
 def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
@@ -78,11 +89,75 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
         return await _triage(triage.unarchive_item, id)
 
     async def _triage(action, item_id: int) -> dict:
+        return await _guard(action(get_conn(), gmail, item_id))
+
+    async def _guard(awaitable):
         try:
-            return await action(get_conn(), gmail, item_id)
-        except triage.TriageError as exc:
+            return await awaitable
+        except USER_ERRORS as exc:
             # ToolError's message reaches Claude as-is; other exceptions are masked.
             raise ToolError(str(exc)) from exc
+
+    def _sync_guard(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except USER_ERRORS as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(description=(
+        "The home screen as data: urgent things (source alerts, tasks due today or overdue, high-priority "
+        "items), inbox counts per account, and open task count. Start here for 'what am I forgetting?'. "
+        f"Dates are local to {settings.timezone}."))
+    async def get_overview() -> dict:
+        return overview.get_overview(get_conn(), settings.today())
+
+    @server.tool(description=(
+        "List tasks. status 'open' (default) returns each top-level task followed by its subtasks; 'done' "
+        "returns recently completed tasks. Each task shows its linked email (item_title, item_url) if any."))
+    async def list_tasks(status: Literal["open", "done"] = "open", parent_id: int | None = None) -> list[dict]:
+        return _sync_guard(tasks.list_tasks, get_conn(), status=status, parent_id=parent_id)
+
+    @server.tool(description=(
+        "Create a task. Link it to mail with item_id (from list_items) or thread (from search_mail); a thread "
+        "is put under sync so a reply reopens it, and completing the task archives it. Tasks are two levels "
+        "deep: parent_id must be a top-level task. due_at is a date (YYYY-MM-DD); priority is high, normal "
+        "or low."))
+    async def create_task(title: str, parent_id: int | None = None, item_id: int | None = None,
+                          thread: ThreadRef | None = None, due_at: str | None = None,
+                          priority: Literal["high", "normal", "low"] | None = None,
+                          notes: str | None = None) -> dict:
+        if thread is not None:
+            if item_id is not None:
+                raise ToolError("pass item_id or thread, not both")
+            item_id = await _guard(mail.ensure_item(get_conn(), gmail, thread.account, thread.thread_id))
+        return _sync_guard(tasks.create_task, get_conn(), title=title, parent_id=parent_id, item_id=item_id,
+                           due_at=due_at, priority=priority, notes=notes)
+
+    @server.tool(description=(
+        "Edit a task. fields may set title, notes, due_at (YYYY-MM-DD), priority (high/normal/low), "
+        "sort_order (number; lower comes first) or parent_id. A null value clears that field."))
+    async def update_task(id: int, fields: dict[str, Any]) -> dict:
+        return _sync_guard(tasks.update_task, get_conn(), id, fields)
+
+    @server.tool(description=(
+        "Complete a task and its open subtasks. A linked email is archived (in Gmail too) once no other "
+        "open task links to it. Returns the task, archived item ids and any warnings."))
+    async def complete_task(id: int) -> dict:
+        return await _guard(tasks.complete_task(get_conn(), gmail, id))
+
+    @server.tool(description=(
+        "Search Gmail with Gmail search syntax (e.g. 'is:unread newer_than:3d', 'from:ann has:attachment'). "
+        "Without account, searches every connected mailbox and merges results newest first. Searches the "
+        "whole mailbox, not just the inbox. Returns thread summaries; read one with get_thread. "
+        f"limit is per account (default {mail.DEFAULT_LIMIT}, max {mail.MAX_LIMIT})."))
+    async def search_mail(query: str, account: str | None = None, limit: int = mail.DEFAULT_LIMIT) -> dict:
+        return await _guard(mail.search_mail(get_conn(), gmail, query, account=account, limit=limit))
+
+    @server.tool(description=(
+        "Read a Gmail thread: each message's sender, recipients, date and body as plain text, with "
+        "attachments listed by name. Fetched live and not stored. account is the mailbox address."))
+    async def get_thread(account: str, thread_id: str) -> dict:
+        return await _guard(mail.get_thread(get_conn(), gmail, account, thread_id))
 
     host = urlparse(base).netloc
     app = server.streamable_http_app(
