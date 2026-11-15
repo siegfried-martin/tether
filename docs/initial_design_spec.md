@@ -271,6 +271,18 @@ Done by hand once, on a machine signed in to the work account:
 
 If the publish section is missing or disabled, the organization has turned publishing off. The hub then runs on the Google sources only.
 
+### Measured feed (first real feed, 2026-11-15)
+
+What one published Exchange Online calendar actually returned. Build and test the ICS connector against these facts:
+
+- One `GET` returns about 2.5 MB of `text/calendar`, with no ETag, Last-Modified or Cache-Control. Change detection therefore relies on the content hash alone.
+- The window runs from about one year back to about two months ahead. Recurring masters carry their rules, so expansion still reaches 90 days ahead.
+- There are 1,180 VEVENTs across 579 UIDs. There are 73 RRULE masters (63 weekly, 6 monthly, 3 daily, 1 yearly), 602 RECURRENCE-ID overrides and 35 EXDATEs. Most overrides share a UID with a master in the feed, so expansion must merge them into the series rather than treat them as separate events.
+- All TZIDs are Windows names, each with a VTIMEZONE block: Eastern, Central, Pacific, India, Pakistan and GTB Standard Time. 204 events are all-day (`VALUE=DATE`). There are no UTC or floating date-times.
+- Every event has `STATUS:CONFIRMED`. Free and busy status is only in `X-MICROSOFT-CDO-BUSYSTATUS`: 251 BUSY, 497 TENTATIVE, 416 FREE and 16 OOF. Unanswered invites arrive as TENTATIVE, so this field decides what counts as a real meeting.
+- There are no ATTENDEE or ORGANIZER lines.
+- That feed was published with full details, not titles and locations. 1,129 events carry a DESCRIPTION, median about 1.5 KB, most with Teams join links. See "Work calendar content" above.
+
 ## MCP tool surface
 
 Seventeen tools, each a one-to-one wrapper over a service function that REST also calls. Nothing sends or replies. The only tool that deletes anything is `release_calendar_hold`, and it deletes only hub events that Tether itself created.
