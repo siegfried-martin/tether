@@ -107,7 +107,7 @@ def test_full_flow_then_tool_call(client, monkeypatch):
         "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}})
     assert init.status_code == 200, init.text
     tools = rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
-    assert [t["name"] for t in tools] == ["sync_status"]
+    assert {t["name"] for t in tools} == {"sync_status", "list_items", "archive_item", "unarchive_item"}
     called = rpc(client, tokens["access_token"], "tools/call", {"name": "sync_status", "arguments": {}})
     assert called.status_code == 200 and "error" not in called.json()
 
@@ -172,3 +172,28 @@ def test_consent_needs_csrf(client, monkeypatch, csrf):
     login(client, monkeypatch)
     assert client.post("/auth/mcp/consent", data={"req": "x", "csrf": csrf or "_", "decision": "approve"}
                        ).status_code == 403
+
+
+def test_inbox_tools(client, conn, fake_gmail, monkeypatch):
+    from conftest import msg
+    from tether.services import items
+    _, _, _, tokens = connect(client, monkeypatch)
+    client.app.state.gmail_clients = lambda account_id: fake_gmail
+    acct = conn.execute("INSERT INTO account (kind, label, color) VALUES ('gmail', 'me@x.com', '#000')").lastrowid
+    fake_gmail.put("t1", msg("m", "t1", labels=["INBOX"]))
+    item_id = items.upsert_item(conn, account_id=acct, external_id="t1", kind="email",
+                                fields={"title": "Hi", "last_activity_at": "2026-11-15T10:00:00Z",
+                                        "last_direction": "in"}).id
+
+    def call(name, **args):
+        body = rpc(client, tokens["access_token"], "tools/call", {"name": name, "arguments": args}).json()
+        return body["result"]
+
+    import json
+    listed = call("list_items")
+    assert listed["structuredContent"]["result"][0]["id"] == item_id
+    archived = call("archive_item", id=item_id)
+    assert json.loads(archived["content"][0]["text"])["state"] == "archived"
+    assert fake_gmail.modifies == [("t1", (), ("INBOX",))]
+    missing = call("archive_item", id=999)
+    assert missing["isError"] and "no item 999" in missing["content"][0]["text"]

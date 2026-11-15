@@ -84,9 +84,53 @@ function usePolling<T>(path: string): { data: T | null; error: string | null; re
   return { data, error, reload }
 }
 
+type Tab = 'open' | 'archived'
+type Toast = { text: string; error?: boolean; undo?: () => void }
+
 function Home() {
   const overview = usePolling<Overview>('/api/overview')
-  const inbox = usePolling<Item[]>('/api/items?state=open&limit=200')
+  const accountList = usePolling<Account[]>('/api/accounts')
+  const [tab, setTab] = useState<Tab>('open')
+  const [account, setAccount] = useState<string | null>(null)
+  const query = new URLSearchParams({ state: tab, limit: tab === 'open' ? '200' : '100' })
+  if (account) query.set('account', account)
+  const list = usePolling<Item[]>(`/api/items?${query}`)
+  // Rows moved out of this view, hidden at once while the server catches up.
+  const [moved, setMoved] = useState<Set<number>>(new Set())
+  const [toast, setToast] = useState<Toast | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), toast.error ? 8000 : 6000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const refresh = () => { list.reload(); overview.reload() }
+  const hide = (id: number, on: boolean) =>
+    setMoved((cur) => { const next = new Set(cur); if (on) next.add(id); else next.delete(id); return next })
+
+  const act = async (item: Item, action: 'archive' | 'unarchive', undoable = true) => {
+    hide(item.id, true)
+    try {
+      const result = await post<Item>(`/api/items/${item.id}/${action}`)
+      const inverse = action === 'archive' ? 'unarchive' : 'archive'
+      setToast(result.note ? { text: result.note }
+        : { text: action === 'archive' ? 'Archived' : 'Moved to inbox',
+            undo: undoable ? () => { setToast(null); act(item, inverse, false) } : undefined })
+      // A row undone back into this view must show again.
+      if (!undoable) hide(item.id, false)
+    } catch (e) {
+      hide(item.id, false)
+      setToast({ text: e instanceof Error ? e.message : String(e), error: true })
+    } finally {
+      refresh()
+    }
+  }
+
+  const counts = overview.data?.inbox
+  const shown = list.data?.filter((i) => !moved.has(i.id))
+  const accountsSeen = accountList.data ?? []
+  const total = counts && (account ? counts.by_account[account] ?? 0 : counts.count)
 
   return (
     <main>
@@ -98,18 +142,63 @@ function Home() {
         </section>
       )}
       <section>
-        <h2>Inbox {inbox.data && <span className="count">{inbox.data.length}</span>}</h2>
-        {inbox.error && <p className="error">Couldn't load the inbox: {inbox.error}</p>}
-        {inbox.data?.length === 0 && <p className="muted">Nothing open.</p>}
+        <div className="inbox-head">
+          <div className="tabs" role="tablist">
+            <button role="tab" aria-selected={tab === 'open'} onClick={() => setTab('open')}>
+              Inbox {total !== undefined && <span className="count">{total}</span>}
+            </button>
+            <button role="tab" aria-selected={tab === 'archived'} onClick={() => setTab('archived')}>
+              Archived
+            </button>
+          </div>
+          {accountsSeen.length > 1 && (
+            <div className="chips" aria-label="Filter by account">
+              <button className="chip" aria-pressed={account === null} onClick={() => setAccount(null)}>All</button>
+              {accountsSeen.map((a) => (
+                <button key={a.id} className="chip" aria-pressed={account === a.label} title={a.label}
+                        onClick={() => setAccount(account === a.label ? null : a.label)}>
+                  <span className="dot" style={{ background: a.color }} />
+                  {a.label}
+                  {tab === 'open' && <span className="chip-count">{counts?.by_account[a.label] ?? 0}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {list.error && <p className="error">Couldn't load the inbox: {list.error}</p>}
+        {shown?.length === 0 && <p className="muted">{tab === 'open' ? 'Nothing open.' : 'Nothing archived yet.'}</p>}
         <ul className="items">
-          {inbox.data?.map((item) => <ItemRow key={item.id} item={item} />)}
+          {shown?.map((item) => (
+            <ItemRow key={item.id} item={item}
+                     onAction={() => act(item, item.state === 'open' ? 'archive' : 'unarchive')} />
+          ))}
         </ul>
       </section>
+      {toast && (
+        <div className={`toast${toast.error ? ' error-toast' : ''}`} role="status">
+          <span>{toast.text}</span>
+          {toast.undo && <button className="link" onClick={toast.undo}>Undo</button>}
+        </div>
+      )}
     </main>
   )
 }
 
-function ItemRow({ item }: { item: Item }) {
+const ArchiveIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9" />
+    <path d="M10 13h4" />
+  </svg>
+)
+const InboxIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 13h5l1.5 3h5L16 13h5" /><path d="M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z" />
+  </svg>
+)
+
+function ItemRow({ item, onAction }: { item: Item; onAction: () => void }) {
   const body = (
     <>
       <span className="swatch" style={{ background: item.account_color }} title={item.account} />
@@ -123,10 +212,15 @@ function ItemRow({ item }: { item: Item }) {
       </span>
     </>
   )
+  const archive = item.state === 'open'
   return (
-    <li>
+    <li className="item-row">
       {item.url ? <a className="item" href={item.url} target="_blank" rel="noreferrer">{body}</a>
                 : <div className="item">{body}</div>}
+      <button className="row-action" onClick={onAction}
+              title={archive ? 'Archive' : 'Move to inbox'} aria-label={`${archive ? 'Archive' : 'Move to inbox'}: ${item.title}`}>
+        {archive ? <ArchiveIcon /> : <InboxIcon />}
+      </button>
     </li>
   )
 }
@@ -181,7 +275,7 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
   return (
     <li className="account">
       <div className="account-head">
-        <span className="swatch" style={{ background: account.color }} />
+        <ColorPicker account={account} onSaved={onSaved} />
         <span className="grow">{account.label}</span>
         <span className={`status ${account.status}`}>
           {account.status === 'ok' ? 'connected' : account.status.replace('_', ' ')}
@@ -196,6 +290,29 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
         <SyncPanel accountId={account.id} sync={account.sync} onSaved={onSaved} />
       )}
     </li>
+  )
+}
+
+function ColorPicker({ account, onSaved }: { account: Account; onSaved: () => void }) {
+  const [color, setColor] = useState(account.color)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => setColor(account.color), [account.color])
+  // The picker reports every step of a drag; save once it settles.
+  useEffect(() => {
+    if (color === account.color) return
+    const timer = setTimeout(() => {
+      patch(`/api/accounts/${account.id}`, { color })
+        .then(() => { setError(null); onSaved() })
+        .catch((e) => { setColor(account.color); setError(e instanceof Error ? e.message : String(e)) })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [color, account.id, account.color, onSaved])
+  return (
+    <label className="color-pick" title={error ?? 'Change color'}>
+      <input type="color" value={color} onChange={(e) => setColor(e.target.value)}
+             aria-label={`Color for ${account.label}`} />
+      <span className="swatch" style={{ background: color }} />
+    </label>
   )
 }
 

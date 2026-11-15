@@ -49,7 +49,7 @@ def upsert_item(
 
     changes = {k: v for k, v in fields.items() if existing[k] != v}
     if state is not None and existing["state"] != state:
-        changes["state"] = state
+        changes |= _state_change(state, now)
     if changes:
         changes["updated_at"] = now
         assignments = ", ".join(f"{k} = ?" for k in changes)
@@ -57,8 +57,21 @@ def upsert_item(
     return UpsertResult(existing["id"], False)
 
 
-def set_state(conn: sqlite3.Connection, item_id: int, state: str) -> None:
-    conn.execute("UPDATE item SET state = ?, updated_at = ? WHERE id = ?", (state, utcnow(), item_id))
+def _state_change(state: str, now: str) -> dict:
+    """Columns to write when an item moves to `state`. archived_at feeds "recently archived"."""
+    return {"state": state, "archived_at": now if state == "archived" else None}
+
+
+def set_state(conn: sqlite3.Connection, item_id: int, state: str, **extra) -> None:
+    """Move an item to `state`. A no-op when it is already there."""
+    now = utcnow()
+    changes = {**_state_change(state, now), **extra, "updated_at": now}
+    assignments = ", ".join(f"{k} = ?" for k in changes)
+    conn.execute(f"UPDATE item SET {assignments} WHERE id = ? AND state != ?", [*changes.values(), item_id, state])
+
+
+def get_by_id(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM item WHERE id = ?", (item_id,)).fetchone()
 
 
 def open_item_ids(conn: sqlite3.Connection, account_id: int) -> dict[str, int]:
@@ -73,10 +86,27 @@ def item_states(conn: sqlite3.Connection, account_id: int) -> dict[str, str]:
     return {r["external_id"]: r["state"] for r in rows}
 
 
+VIEW_SQL = """
+    SELECT i.id, i.kind, i.title, i.sender, i.snippet, i.needed, i.url, i.last_activity_at,
+           i.last_direction, i.state, i.archived_at, i.priority, i.due_at,
+           a.id AS account_id, a.label AS account, a.color AS account_color
+    FROM item i JOIN account a ON a.id = i.account_id
+"""
+
+
+def view(conn: sqlite3.Connection, item_id: int) -> dict | None:
+    row = conn.execute(f"{VIEW_SQL} WHERE i.id = ?", (item_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def list_items(
     conn: sqlite3.Connection, *, account: str | None = None, state: str | None = "open", limit: int = 100
 ) -> list[dict]:
-    """Inbox items, newest activity first, with their account's label and color."""
+    """Inbox items with their account's label and color.
+
+    Open items come newest activity first. Archived items come most recently
+    archived first, then items that were never open (sent-only threads).
+    """
     where, params = [], []
     if state:
         where.append("i.state = ?")
@@ -85,16 +115,19 @@ def list_items(
         where.append("a.label = ?")
         params.append(account)
     clause = f"WHERE {' AND '.join(where)}" if where else ""
+    order = "i.archived_at IS NULL, i.archived_at DESC, " if state == "archived" else ""
     rows = conn.execute(
-        f"""
-        SELECT i.id, i.kind, i.title, i.sender, i.snippet, i.needed, i.url, i.last_activity_at,
-               i.last_direction, i.state, i.priority, i.due_at,
-               a.label AS account, a.color AS account_color
-        FROM item i JOIN account a ON a.id = i.account_id
-        {clause}
-        ORDER BY i.last_activity_at DESC
-        LIMIT ?
-        """,
+        f"{VIEW_SQL} {clause} ORDER BY {order}i.last_activity_at DESC LIMIT ?",
         [*params, min(max(limit, 1), 500)],
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def open_counts(conn: sqlite3.Connection) -> dict:
+    """Open items in total and per account label, for the inbox header and filter chips."""
+    rows = conn.execute(
+        """SELECT a.label, COUNT(i.id) AS n FROM account a
+           LEFT JOIN item i ON i.account_id = a.id AND i.state = 'open'
+           GROUP BY a.id ORDER BY a.id"""
+    ).fetchall()
+    return {"total": sum(r["n"] for r in rows), "by_account": {r["label"]: r["n"] for r in rows}}

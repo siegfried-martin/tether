@@ -39,6 +39,8 @@ class FakeGmail:
         self.history_id = 100
         self.expired = False
         self.fetches: list[str] = []
+        self.modifies: list[tuple] = []
+        self.fail_with: Exception | None = None  # raised by the next write
 
     def put(self, thread_id, *messages):
         self.threads[thread_id] = {"id": thread_id, "messages": list(messages)}
@@ -65,6 +67,24 @@ class FakeGmail:
     async def get_thread(self, thread_id):
         self.fetches.append(thread_id)
         return self.threads.get(thread_id)
+
+    async def modify_thread(self, thread_id, *, add=(), remove=()):
+        if self.fail_with:
+            exc, self.fail_with = self.fail_with, None
+            raise exc
+        self.modifies.append((thread_id, tuple(add), tuple(remove)))
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            return False
+        for m in thread["messages"]:
+            m["labelIds"] = [lbl for lbl in m["labelIds"] if lbl not in remove] + \
+                [lbl for lbl in add if lbl not in m["labelIds"]]
+            entry = {"message": {"id": m["id"], "threadId": thread_id, "labelIds": m["labelIds"]}}
+            if add:
+                self.record(labelsAdded=[{**entry, "labelIds": list(add)}])
+            if remove:
+                self.record(labelsRemoved=[{**entry, "labelIds": list(remove)}])
+        return True
 
     async def list_history(self, start):
         if self.expired:

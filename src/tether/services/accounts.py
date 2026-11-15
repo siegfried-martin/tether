@@ -1,5 +1,6 @@
 """Accounts and their encrypted credentials."""
 
+import re
 import sqlite3
 
 from tether.crypto import Vault
@@ -67,6 +68,18 @@ def update_sync_settings(
         conn.execute(f"UPDATE account SET {assignments} WHERE id = ?", [*changes.values(), account_id])
         sync_state.set_cursor(conn, account_id, sync_state.GMAIL_HISTORY, sync_state.RECONCILE)
     return True
+
+
+COLOR_RE = re.compile(r"^#[0-9a-f]{6}$")
+
+
+def set_color(conn: sqlite3.Connection, account_id: int, color: str) -> None:
+    """Set an account's color: a hex value like #2f6fdb, shown on every item row."""
+    color = color.strip().lower()
+    if not COLOR_RE.match(color):
+        raise ValueError("color must be a hex value like #2f6fdb")
+    if conn.execute("UPDATE account SET color = ? WHERE id = ?", (color, account_id)).rowcount == 0:
+        raise LookupError(f"no account {account_id}")
 
 
 def sync_settings_key(account: sqlite3.Row) -> tuple:

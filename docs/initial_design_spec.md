@@ -43,7 +43,7 @@ Nine tables, single user, no tenancy. Each synced table has a natural key so eve
 | --- | --- | --- |
 | `account` | id, kind (gmail, slack, groupme, digest, ics), label, color, status, excluded\_categories and initial\_sync\_days (Gmail only) | label |
 | `credential` | id, account\_id, ciphertext, scopes, expires\_at, updated\_at | account\_id |
-| `item` | id, account\_id, external\_id, kind (email, chat, digest), title, sender, snippet, needed, url, last\_activity\_at, last\_direction (in, out), state (open, archived), archived\_through, priority, due\_at, last\_evaluated\_sent\_id, created\_at, updated\_at | account\_id + external\_id |
+| `item` | id, account\_id, external\_id, kind (email, chat, digest), title, sender, snippet, needed, url, last\_activity\_at, last\_direction (in, out), state (open, archived), archived\_at, archived\_through, priority, due\_at, last\_evaluated\_sent\_id, created\_at, updated\_at | account\_id + external\_id |
 | `task` | id, parent\_id, title, notes, status (open, done), due\_at, priority, sort\_order, item\_id, completed\_at, created\_at, updated\_at | none |
 | `follow_up` | id, item\_id, waiting\_for, sent\_at, due\_at, status (proposed, waiting, replied, dismissed), source (manual, classifier, digest) | one non-terminal row per item (partial unique index) |
 | `calendar_source` | id, account\_id, kind (google, ics), external\_ref, enabled | account\_id + external\_ref |
@@ -54,7 +54,8 @@ Nine tables, single user, no tenancy. Each synced table has a natural key so eve
 ### Item rules
 
 - `external_id` by source: Gmail thread ID; Slack channel ID for DMs, `channel:thread_ts` for mentions (a top-level mention uses its own `ts`); GroupMe group ID; a content hash for digest items.
-- State is open or archived, nothing else.
+- State is open or archived, nothing else. `archived_at` records when an item last moved to archived, which orders the Archived view. It is empty for items that were never open, such as sent-only threads.
+- Archive and unarchive write to Gmail before Tether's state changes, so a failed write leaves both sides as they were. Unarchive then re-reads the thread and mirrors it, so a thread whose category is excluded stays archived in Tether, and the app says why.
 - Unarchive reopens an item. For Gmail it adds INBOX back to the thread; for chat and digest items it is local.
 - Chat items have no provider inbox. Archive sets `archived_through` to the last activity time, and any later inbound message reopens the item.
 

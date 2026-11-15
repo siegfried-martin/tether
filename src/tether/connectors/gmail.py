@@ -199,6 +199,7 @@ class GmailApi(Protocol):
     async def list_thread_ids(self, query: str) -> list[str]: ...
     async def get_thread(self, thread_id: str) -> dict | None: ...
     async def list_history(self, start_history_id: str) -> tuple[list[dict], str]: ...
+    async def modify_thread(self, thread_id: str, *, add: list[str] = (), remove: list[str] = ()) -> bool: ...
 
 
 class GmailClient:
@@ -244,11 +245,15 @@ class GmailClient:
         self._next_request_at = time.monotonic() + self.MIN_INTERVAL
 
     async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
+        return await self._request("GET", path, params=params)
+
+    async def _request(self, method: str, path: str, *, params: dict | None = None,
+                       json: dict | None = None) -> httpx.Response:
         refreshed, quota_waits = False, 0
         while True:
             await self._pace()
-            resp = await self.http.get(f"{API}{path}", params=params,
-                                       headers={"Authorization": f"Bearer {await self._token()}"})
+            resp = await self.http.request(method, f"{API}{path}", params=params, json=json,
+                                           headers={"Authorization": f"Bearer {await self._token()}"})
             if resp.status_code == 401:
                 if refreshed:
                     raise AuthError("Gmail rejected a freshly refreshed token (401)")
@@ -311,6 +316,27 @@ class GmailClient:
             page = body.get("nextPageToken")
             if not page:
                 return records, latest
+
+    async def modify_thread(self, thread_id: str, *, add: list[str] = (), remove: list[str] = ()) -> bool:
+        """Add and remove labels on every message in a thread. False when the thread is gone."""
+        resp = await self._request("POST", f"/threads/{thread_id}/modify",
+                                   json={"addLabelIds": list(add), "removeLabelIds": list(remove)})
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        return True
+
+
+class GmailClients:
+    """Builds a GmailClient per account for one-off writes (archive, unarchive)."""
+
+    def __init__(self, http: httpx.AsyncClient, conn: sqlite3.Connection, vault: Vault,
+                 client_id: str, client_secret: str):
+        self.http, self.conn, self.vault = http, conn, vault
+        self.client_id, self.client_secret = client_id, client_secret
+
+    def __call__(self, account_id: int) -> GmailClient:
+        return GmailClient(self.http, self.conn, self.vault, account_id, self.client_id, self.client_secret)
 
 
 # --------------------------------------------------------------------------

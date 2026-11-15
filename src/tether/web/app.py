@@ -25,12 +25,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from tether import db
 from tether.config import Settings, get_settings
 from tether.connectors import google_oauth
+from tether.connectors.gmail import GmailClients
 from tether.connectors.google_oauth import AuthError
 from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import GmailPoller
-from tether.services import accounts, items, sync_state
+from tether.services import accounts, items, sync_state, triage
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ class SyncSettingsUpdate(BaseModel):
     initial_sync_days: int | None = None
 
 
+class AccountUpdate(BaseModel):
+    color: str
+
+
 def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, start_pollers: bool = True) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -47,6 +52,8 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         app.state.vault = Vault(settings.encryption_key)
         app.state.http = httpx.AsyncClient(timeout=30)
         app.state.gmail = GmailPoller(app.state.conn, app.state.vault, app.state.http, settings)
+        app.state.gmail_clients = GmailClients(app.state.http, app.state.conn, app.state.vault,
+                                               settings.google_client_id, settings.google_client_secret)
         tasks = [asyncio.create_task(app.state.gmail.run_forever())] if start_pollers else []
         try:
             async with mcp_server.session_manager.run():
@@ -60,7 +67,8 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=settings.secure_cookies,
                        same_site="lax", max_age=60 * 60 * 24 * 30)
     # MCP endpoint and its OAuth server (metadata, /register, /authorize, /token, /revoke).
-    mcp_server, mcp_provider, mcp_app = mcp.build(settings, lambda: app.state.conn)
+    mcp_server, mcp_provider, mcp_app = mcp.build(
+        settings, lambda: app.state.conn, lambda account_id: app.state.gmail_clients(account_id))
     app.add_middleware(mcp.MCPRouter, mcp_app=mcp_app)
 
     # Dependencies are async so FastAPI runs them on the loop thread, not a threadpool.
@@ -188,6 +196,20 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             raise HTTPException(422, "state must be open or archived")
         return items.list_items(conn, account=account, state=state, limit=limit)
 
+    async def _triage(request: Request, action, item_id: int) -> dict:
+        try:
+            return await action(request.app.state.conn, request.app.state.gmail_clients, item_id)
+        except triage.TriageError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
+    @app.post("/api/items/{item_id}/archive")
+    async def archive_item(item_id: int, request: Request, _: str = Depends(require_user)):
+        return await _triage(request, triage.archive_item, item_id)
+
+    @app.post("/api/items/{item_id}/unarchive")
+    async def unarchive_item(item_id: int, request: Request, _: str = Depends(require_user)):
+        return await _triage(request, triage.unarchive_item, item_id)
+
     def account_view(a: sqlite3.Row) -> dict:
         view = {"id": a["id"], "kind": a["kind"], "label": a["label"], "color": a["color"], "status": a["status"]}
         if a["kind"] == "gmail":
@@ -202,6 +224,17 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     @app.get("/api/accounts")
     async def list_accounts(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
         return [account_view(a) for a in accounts.list_accounts(conn)]
+
+    @app.patch("/api/accounts/{account_id}")
+    async def update_account(account_id: int, body: AccountUpdate,
+                             _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        try:
+            accounts.set_color(conn, account_id, body.color)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return account_view(accounts.get_account(conn, account_id))
 
     @app.patch("/api/accounts/{account_id}/sync")
     async def update_sync(account_id: int, body: SyncSettingsUpdate, request: Request,
@@ -224,9 +257,10 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
 
     @app.get("/api/overview")
     async def overview(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
-        open_items = items.list_items(conn, state="open", limit=5)
-        count = conn.execute("SELECT COUNT(*) FROM item WHERE state = 'open'").fetchone()[0]
-        return {"urgent": sync_state.source_alerts(conn), "inbox": {"count": count, "preview": open_items}}
+        counts = items.open_counts(conn)
+        return {"urgent": sync_state.source_alerts(conn),
+                "inbox": {"count": counts["total"], "by_account": counts["by_account"],
+                          "preview": items.list_items(conn, state="open", limit=5)}}
 
     # -------------------------------------------------------------- static
 
