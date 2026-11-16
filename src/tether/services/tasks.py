@@ -29,7 +29,7 @@ class TaskError(ValueError):
 VIEW_SQL = """
     SELECT t.id, t.parent_id, t.title, t.notes, t.status, t.due_at, t.priority, t.sort_order,
            t.item_id, t.completed_at, t.created_at, t.updated_at,
-           i.title AS item_title, i.url AS item_url, i.state AS item_state,
+           i.title AS item_title, i.url AS item_url, i.state AS item_state, i.kind AS item_kind,
            a.label AS item_account, a.color AS item_color
     FROM task t
     LEFT JOIN item i ON i.id = t.item_id
@@ -73,6 +73,31 @@ def list_tasks(conn: sqlite3.Connection, *, status: str | None = "open", parent_
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def task_page(conn: sqlite3.Connection, *, offset: int = 0, limit: int = 50) -> dict:
+    """Every task, for the Tasks page: open tasks oldest first, each followed by its open
+    subtasks, then completed tasks most recently completed first.
+
+    Paging counts groups (a task with its subtasks), so a page never splits one.
+    """
+    rows = [dict(r) for r in conn.execute(f"{VIEW_SQL} ORDER BY t.created_at, t.id").fetchall()]
+    open_rows = [r for r in rows if r["status"] == "open"]
+    open_ids = {r["id"] for r in open_rows}
+    children: dict[int, list[dict]] = {}
+    for r in open_rows:
+        if r["parent_id"] in open_ids:
+            children.setdefault(r["parent_id"], []).append(r)
+    groups = [[r, *children.get(r["id"], [])] for r in open_rows if r["parent_id"] not in open_ids]
+    done = sorted((r for r in rows if r["status"] == "done"),
+                  key=lambda r: (r["completed_at"] or "", r["parent_id"] is None, -r["id"]), reverse=True)
+    groups += [[r] for r in done]
+    offset, limit = max(offset, 0), min(max(limit, 1), 200)
+    return {
+        "tasks": [t for g in groups[offset:offset + limit] for t in g],
+        "total": len(groups),
+        "open": len(open_rows),
+    }
 
 
 def _check_parent(conn: sqlite3.Connection, parent_id: int | None, task_id: int | None = None) -> None:

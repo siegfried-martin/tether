@@ -200,9 +200,8 @@ def digest_account(conn: sqlite3.Connection, label: str) -> int:
     rows = accounts.list_accounts(conn, kind="digest")
     if rows:
         return rows[0]["id"]
-    count = conn.execute("SELECT COUNT(*) FROM account").fetchone()[0]
     return conn.execute("INSERT INTO account (kind, label, color) VALUES ('digest', ?, ?)",
-                        (label, accounts.PALETTE[count % len(accounts.PALETTE)])).lastrowid
+                        (label, accounts.next_color(conn, "digest"))).lastrowid
 
 
 def _digest_date(value: date | str | None, today: date) -> date:

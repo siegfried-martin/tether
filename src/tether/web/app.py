@@ -244,11 +244,17 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         return {"email": user}
 
     @app.get("/api/items")
-    async def list_items(account: str | None = None, state: str | None = "open", limit: int = 100,
+    async def list_items(account: str | None = None, state: str | None = "open", limit: int = 50, offset: int = 0,
                          _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
         if state not in (None, "open", "archived"):
             raise HTTPException(422, "state must be open or archived")
-        return items.list_items(conn, account=account, state=state, limit=limit)
+        return {"items": items.list_items(conn, account=account, state=state, limit=limit, offset=offset),
+                "total": items.count_items(conn, account=account, state=state)}
+
+    @app.get("/api/items/{item_id}/thread")
+    async def item_thread(item_id: int, request: Request, _: str = Depends(require_user)):
+        with user_errors():
+            return await mail.get_item_thread(request.app.state.conn, request.app.state.gmail_clients, item_id)
 
     async def _triage(request: Request, action, item_id: int) -> dict:
         with user_errors():
@@ -318,6 +324,11 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
                          conn: sqlite3.Connection = Depends(conn_dep)):
         with user_errors():
             return tasks.list_tasks(conn, status=status)
+
+    @app.get("/api/tasks/page")
+    async def task_page(offset: int = 0, limit: int = 50, _: str = Depends(require_user),
+                        conn: sqlite3.Connection = Depends(conn_dep)):
+        return tasks.task_page(conn, offset=offset, limit=limit)
 
     @app.post("/api/tasks", status_code=201)
     async def create_task(body: TaskCreate, _: str = Depends(require_user),

@@ -67,3 +67,23 @@ def test_rebuild_migration_keeps_rows_and_foreign_keys(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         c.execute("INSERT INTO sync_state (account_id, stream) VALUES (99, 's')")
     c.close()
+
+
+def test_palette_migration_and_work_color(tmp_path):
+    """0007 moves default colors to the color-blind-safe palette; work accounts share a color."""
+    from tether import db as dbmod
+    from tether.services import accounts
+    c = sqlite3.connect(tmp_path / "p.db", isolation_level=None)
+    for version, sql in dbmod._migrations():
+        if version < 7:
+            dbmod._apply(c, version, sql)
+    c.execute("INSERT INTO account (kind, label, color) VALUES ('gmail', 'a', '#2f6fdb')")
+    c.execute("INSERT INTO account (kind, label, color) VALUES ('gmail', 'b', '#123456')")
+    c.execute("INSERT INTO account (kind, label, color) VALUES ('ics', 'cal', '#e8590c')")
+    c.execute("INSERT INTO account (kind, label, color) VALUES ('digest', 'Work', '#0c8599')")
+    c.close()
+    c = dbmod.connect(tmp_path / "p.db")
+    assert [r[0] for r in c.execute("SELECT color FROM account ORDER BY id")] == \
+        ["#0072b2", "#123456", "#d4b000", "#d4b000"]
+    assert accounts.next_color(c, "digest") == "#d4b000"
+    assert accounts.next_color(c, "gmail") == accounts.PALETTE[4]

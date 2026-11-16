@@ -51,6 +51,23 @@ def test_list_groups_subtasks_under_parent(conn):
     assert [t["id"] for t in tasks.list_tasks(conn)] == [b["id"], b1["id"], a["id"], a1["id"], a2["id"]]
 
 
+async def test_task_page_order_and_paging(conn, fake_gmail, gmail):
+    a = tasks.create_task(conn, title="A")
+    b = tasks.create_task(conn, title="B")
+    tasks.create_task(conn, title="A1", parent_id=a["id"])
+    c = tasks.create_task(conn, title="C")
+    d = tasks.create_task(conn, title="D")
+    conn.execute("UPDATE task SET sort_order = -1 WHERE id = ?", (d["id"],))  # page order ignores manual order
+    for task, at in ((b, "2026-11-15T09:00:00Z"), (c, "2026-11-15T11:00:00Z")):
+        await tasks.complete_task(conn, gmail, task["id"])
+        conn.execute("UPDATE task SET completed_at = ? WHERE id = ?", (at, task["id"]))
+    page = tasks.task_page(conn)
+    assert [t["title"] for t in page["tasks"]] == ["A", "A1", "D", "C", "B"], "open oldest first, then newest done"
+    assert page["total"] == 4 and page["open"] == 3
+    second = tasks.task_page(conn, offset=1, limit=2)
+    assert [t["title"] for t in second["tasks"]] == ["D", "C"], "a page counts a task with its subtasks as one"
+
+
 def test_field_validation(conn):
     with pytest.raises(tasks.TaskError, match="title"):
         tasks.create_task(conn, title="  ")

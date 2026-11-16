@@ -17,6 +17,7 @@ export function usePolling<T>(path: string): { data: T | null; error: string | n
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const reload = useCallback(() => {
+    if (!path) return
     get<T>(path)
       .then((d) => { setData(d); setError(null) })
       .catch((e) => {
@@ -57,3 +58,67 @@ export function ToastView({ toast }: { toast: Toast | null }) {
 }
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+export const PAGE_SIZE = 50
+
+/** The page number in the URL (1-based), clamped to at least 1. */
+export function pageParam(params: URLSearchParams): number {
+  const n = Number(params.get('page'))
+  return Number.isInteger(n) && n > 1 ? n : 1
+}
+
+export function Pager({ page, total, onPage }: { page: number; total: number; onPage: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  if (total <= PAGE_SIZE && page === 1) return null
+  const first = Math.min(total, (page - 1) * PAGE_SIZE + 1)
+  const last = Math.min(total, page * PAGE_SIZE)
+  return (
+    <nav className="pager" aria-label="Pages">
+      <span className="muted">{first}–{last} of {total}</span>
+      <button className="pager-button" onClick={() => onPage(page - 1)} disabled={page <= 1} aria-label="Previous page">‹</button>
+      <button className="pager-button" onClick={() => onPage(page + 1)} disabled={page >= pages} aria-label="Next page">›</button>
+    </nav>
+  )
+}
+
+/** Inline style that gives a row its account's color: a solid edge and a tinted background. */
+export function accountStyle(color: string | null | undefined): React.CSSProperties {
+  return { '--acct': color ?? 'var(--muted)' } as React.CSSProperties
+}
+
+const URL_RE = /(https?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?])/g
+
+/** Plain text with its web links made clickable. */
+export function Linkified({ text }: { text: string }) {
+  const parts = text.split(URL_RE)
+  return (
+    <>
+      {parts.map((part, n) => (n % 2 === 1
+        ? <a key={n} href={part} target="_blank" rel="noreferrer noopener" className="inline-link">{part}</a>
+        : part))}
+    </>
+  )
+}
+
+export function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`)
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function DueLabel({ due }: { due: string | null }) {
+  if (!due) return null
+  const day = due.slice(0, 10)
+  const today = localToday()
+  const pretty = new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (day < today) return <span className="due overdue">Overdue · {pretty}</span>
+  if (day === today) return <span className="due today">Today</span>
+  if (day === addDays(today, 1)) return <span className="due">Tomorrow</span>
+  return <span className="due">{pretty}</span>
+}
+

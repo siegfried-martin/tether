@@ -100,14 +100,7 @@ def view(conn: sqlite3.Connection, item_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def list_items(
-    conn: sqlite3.Connection, *, account: str | None = None, state: str | None = "open", limit: int = 100
-) -> list[dict]:
-    """Inbox items with their account's label and color.
-
-    Open items come newest activity first. Archived items come most recently
-    archived first, then items that were never open (sent-only threads).
-    """
+def _filters(account: str | None, state: str | None) -> tuple[str, list]:
     where, params = [], []
     if state:
         where.append("i.state = ?")
@@ -115,13 +108,31 @@ def list_items(
     if account:
         where.append("a.label = ?")
         params.append(account)
-    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    return (f"WHERE {' AND '.join(where)}" if where else ""), params
+
+
+def list_items(
+    conn: sqlite3.Connection, *, account: str | None = None, state: str | None = "open", limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Inbox items with their account's label and color.
+
+    Open items come newest activity first. Archived items come most recently
+    archived first, then items that were never open (sent-only threads).
+    """
+    clause, params = _filters(account, state)
     order = "i.archived_at IS NULL, i.archived_at DESC, " if state == "archived" else ""
     rows = conn.execute(
-        f"{VIEW_SQL} {clause} ORDER BY {order}i.last_activity_at DESC LIMIT ?",
-        [*params, min(max(limit, 1), 500)],
+        f"{VIEW_SQL} {clause} ORDER BY {order}i.last_activity_at DESC, i.id DESC LIMIT ? OFFSET ?",
+        [*params, min(max(limit, 1), 500), max(offset, 0)],
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def count_items(conn: sqlite3.Connection, *, account: str | None = None, state: str | None = "open") -> int:
+    clause, params = _filters(account, state)
+    return conn.execute(f"SELECT COUNT(*) FROM item i JOIN account a ON a.id = i.account_id {clause}",
+                        params).fetchone()[0]
 
 
 def open_counts(conn: sqlite3.Connection) -> dict:

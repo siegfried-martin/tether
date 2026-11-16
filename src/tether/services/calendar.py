@@ -126,9 +126,8 @@ def ensure_ics_source(conn: sqlite3.Connection, label: str) -> int:
             conn.execute("UPDATE account SET label = ? WHERE id = ? AND label != ? AND NOT EXISTS "
                          "(SELECT 1 FROM account WHERE label = ?)", (label, account_id, label, label))
         else:
-            count = conn.execute("SELECT COUNT(*) FROM account").fetchone()[0]
             account_id = conn.execute("INSERT INTO account (kind, label, color) VALUES ('ics', ?, ?)",
-                                      (label, accounts.PALETTE[count % len(accounts.PALETTE)])).lastrowid
+                                      (label, accounts.next_color(conn, "ics"))).lastrowid
         source = conn.execute("SELECT id FROM calendar_source WHERE account_id = ? AND external_ref = ?",
                               (account_id, ICS_REF)).fetchone()
         if source:

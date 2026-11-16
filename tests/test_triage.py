@@ -122,7 +122,7 @@ def test_archive_api_and_archived_listing(client, conn, fake_gmail, monkeypatch,
     old, new = (items.get_item(conn, acct, t)["id"] for t in ("old", "new"))
     assert client.post(f"/api/items/{new}/archive").json()["state"] == "archived"
     assert client.post(f"/api/items/{old}/archive").json()["state"] == "archived"
-    archived = client.get("/api/items?state=archived").json()
+    archived = client.get("/api/items?state=archived").json()["items"]
     assert [i["id"] for i in archived] == [old, new], "most recently archived first"
     assert client.post(f"/api/items/{old}/unarchive").json()["state"] == "open"
     assert client.get("/api/overview").json()["inbox"]["by_account"] == {EMAIL: 1}

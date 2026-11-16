@@ -33,9 +33,26 @@ export type Task = {
   item_title: string | null
   item_url: string | null
   item_state: 'open' | 'archived' | null
+  item_kind: Item['kind'] | null
   item_account: string | null
   item_color: string | null
 }
+
+export type ItemPage = { items: Item[]; total: number }
+export type TaskPage = { tasks: Task[]; total: number; open: number }
+
+export type ThreadMessage = {
+  from: string
+  to: string
+  cc: string
+  date: string
+  sent_by_me: boolean
+  body: string
+  truncated: boolean
+  attachments: { name: string; size: number; type: string }[]
+}
+
+export type Thread = { account: string; subject: string; item_id: number | null; messages: ThreadMessage[] }
 
 export type Alert = { kind: string; account: string; message: string }
 

@@ -108,10 +108,17 @@ def test_items_and_overview(client, conn, monkeypatch):
     items.upsert_item(conn, account_id=acct, external_id="t", kind="email",
                       fields={"title": "Hi", "last_activity_at": "2026-11-15T10:00:00Z", "last_direction": "in"})
     accounts.set_status(conn, acct, "auth_error")
-    [item] = client.get("/api/items").json()
+    listed = client.get("/api/items").json()
+    assert listed["total"] == 1
+    [item] = listed["items"]
     assert item["title"] == "Hi" and item["account_color"] == "#123"
+    for n in range(3):
+        items.upsert_item(conn, account_id=acct, external_id=f"p{n}", kind="email",
+                          fields={"title": f"P{n}", "last_activity_at": f"2026-11-14T10:0{n}:00Z", "last_direction": "in"})
+    page = client.get("/api/items?limit=2&offset=2").json()
+    assert page["total"] == 4 and [i["title"] for i in page["items"]] == ["P1", "P0"]
     overview = client.get("/api/overview").json()
-    assert overview["inbox"]["count"] == 1
+    assert overview["inbox"]["count"] == 4
     assert overview["urgent"]["alerts"][0]["kind"] == "auth_error"
 
 

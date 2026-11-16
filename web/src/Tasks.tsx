@@ -1,44 +1,27 @@
 import { useEffect, useState } from 'react'
-import { del, patch, post, type Task } from './api'
-import { errorText, ToastView, usePolling, useToast, type Toast } from './shared'
-
-function localToday(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`)
-  d.setDate(d.getDate() + days)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-export function DueLabel({ due }: { due: string | null }) {
-  if (!due) return null
-  const day = due.slice(0, 10)
-  const today = localToday()
-  const pretty = new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  if (day < today) return <span className="due overdue">Overdue · {pretty}</span>
-  if (day === today) return <span className="due today">Today</span>
-  if (day === addDays(today, 1)) return <span className="due">Tomorrow</span>
-  return <span className="due">{pretty}</span>
-}
+import { del, patch, post, type Task, type TaskPage } from './api'
+import { accountStyle, addDays, DueLabel, errorText, localToday, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast, type Toast } from './shared'
+import { ExternalIcon, externalName, ReadingPane } from './Mail'
+import { navigate, withParams, type Location } from './route'
 
 type Done = Task & { warnings: string[]; archived_items: number[] }
 
-export function TasksPage() {
-  const open = usePolling<Task[]>('/api/tasks?status=open')
-  const [showDone, setShowDone] = useState(false)
-  const [doneVersion, setDoneVersion] = useState(0)
+export function TasksPage({ loc }: { loc: Location }) {
+  const page = pageParam(loc.params)
+  const list = usePolling<TaskPage>(`/api/tasks/page?offset=${(page - 1) * PAGE_SIZE}&limit=${PAGE_SIZE}`)
   const [editing, setEditing] = useState<number | null>(null)
-  const [hidden, setHidden] = useState<Set<number>>(new Set())
+  const [reading, setReading] = useState<number | null>(null)
+  // Checked at once, before the server answers.
+  const [flipped, setFlipped] = useState<Set<number>>(new Set())
   const [toast, setToast] = useToast()
 
-  const refresh = () => { open.reload(); setDoneVersion((v) => v + 1) }
+  const refresh = list.reload
   const fail = (e: unknown) => setToast({ text: errorText(e), error: true })
+  const flip = (id: number, on: boolean) =>
+    setFlipped((cur) => { const next = new Set(cur); if (on) next.add(id); else next.delete(id); return next })
 
   const complete = async (task: Task) => {
-    setHidden((h) => new Set(h).add(task.id))
+    flip(task.id, true)
     try {
       const result = await post<Done>(`/api/tasks/${task.id}/complete`)
       const undo = () => { setToast(null); post(`/api/tasks/${task.id}/reopen`).then(refresh, fail) }
@@ -48,53 +31,38 @@ export function TasksPage() {
     } catch (e) {
       fail(e)
     } finally {
-      setHidden((h) => { const n = new Set(h); n.delete(task.id); return n })
+      flip(task.id, false)
       refresh()
     }
   }
 
-  const reopen = (task: Task) => post(`/api/tasks/${task.id}/reopen`).then(refresh, fail)
+  const reopen = async (task: Task) => {
+    flip(task.id, true)
+    try { await post(`/api/tasks/${task.id}/reopen`) } catch (e) { fail(e) } finally { flip(task.id, false); refresh() }
+  }
 
-  const rows = open.data?.filter((t) => !hidden.has(t.id) && !(t.parent_id && hidden.has(t.parent_id)))
+  const rows = list.data?.tasks
+  const firstDone = rows?.findIndex((t) => t.status === 'done') ?? -1
 
   return (
     <main className="tasks-page">
       <AddTask onAdded={refresh} onError={fail} placeholder="Add a task" />
-      {open.error && <p className="error">Couldn't load tasks: {open.error}</p>}
-      {rows?.length === 0 && <p className="muted">No open tasks. Make one from an email in the inbox, or above.</p>}
+      {list.error && <p className="error">Couldn't load tasks: {list.error}</p>}
+      {list.data && list.data.open === 0 && page === 1 && (
+        <p className="muted">No open tasks. Make one from an email in the inbox, or above.</p>
+      )}
       <ul className="tasks">
-        {rows?.map((t) => (
-          <TaskRow key={t.id} task={t} editing={editing === t.id}
+        {rows?.map((t, n) => (
+          <TaskRow key={t.id} task={t} first={n === firstDone} editing={editing === t.id} reading={reading === t.id}
+                   checked={(t.status === 'done') !== flipped.has(t.id)}
                    onToggleEdit={() => setEditing(editing === t.id ? null : t.id)}
-                   onCheck={() => complete(t)} onChanged={refresh} onError={fail} />
+                   onToggleRead={() => setReading(reading === t.id ? null : t.id)}
+                   onCheck={() => (t.status === 'done' ? reopen(t) : complete(t))} onChanged={refresh} onError={fail} />
         ))}
       </ul>
-      <button className="link done-toggle" onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>
-        {showDone ? 'Hide completed' : 'Show completed'}
-      </button>
-      {showDone && <DoneList version={doneVersion} onReopen={reopen} />}
+      {list.data && <Pager page={page} total={list.data.total} onPage={(n) => navigate(withParams({ page: n > 1 ? n : null }))} />}
       <ToastView toast={toast} />
     </main>
-  )
-}
-
-function DoneList({ version, onReopen }: { version: number; onReopen: (t: Task) => void }) {
-  const done = usePolling<Task[]>('/api/tasks?status=done')
-  const { reload } = done
-  useEffect(() => { if (version) reload() }, [version, reload])
-  return (
-    <ul className="tasks done">
-      {done.data?.length === 0 && <li className="muted">Nothing completed yet.</li>}
-      {done.data?.map((t) => (
-        <li key={t.id} className="task-row">
-          <div className="task-line">
-            <input type="checkbox" className="check" checked onChange={() => onReopen(t)}
-                   aria-label={`Reopen: ${t.title}`} />
-            <span className="task-title">{t.title}</span>
-          </div>
-        </li>
-      ))}
-    </ul>
   )
 }
 
@@ -126,31 +94,45 @@ function AddTask({ parentId, onAdded, onError, placeholder }: {
   )
 }
 
-function TaskRow({ task, editing, onToggleEdit, onCheck, onChanged, onError }: {
-  task: Task; editing: boolean; onToggleEdit: () => void; onCheck: () => void
+function TaskRow({ task, first, editing, reading, checked, onToggleEdit, onToggleRead, onCheck, onChanged, onError }: {
+  task: Task; first: boolean; editing: boolean; reading: boolean; checked: boolean
+  onToggleEdit: () => void; onToggleRead: () => void; onCheck: () => void
   onChanged: () => void; onError: (e: unknown) => void
 }) {
+  const done = task.status === 'done'
   return (
-    <li className={`task-row${task.parent_id ? ' subtask' : ''}${editing ? ' editing' : ''}`}>
+    <li className={`task-row${task.parent_id ? ' subtask' : ''}${editing ? ' editing' : ''}${done ? ' done' : ''}${first ? ' first-done' : ''}`}>
+      {first && <h2 className="done-head">Completed</h2>}
       <div className="task-line">
-        <input type="checkbox" className="check" checked={false} onChange={onCheck}
-               aria-label={`Complete: ${task.title}`} />
-        <button className="task-title" onClick={onToggleEdit} aria-expanded={editing}>{task.title}</button>
+        <input type="checkbox" className="check" checked={checked} onChange={onCheck}
+               aria-label={`${done ? 'Reopen' : 'Complete'}: ${task.title}`} />
+        <button className="task-title" onClick={onToggleEdit} aria-expanded={editing} disabled={done}>{task.title}</button>
         <span className="task-meta">
-          {task.priority === 'high' && <span className="flag">High</span>}
-          {task.notes && <span className="muted" title={task.notes}>✎</span>}
-          <DueLabel due={task.due_at} />
+          {done ? task.completed_at && <span className="muted due">{relativeTime(task.completed_at)}</span> : <>
+            {task.priority === 'high' && <span className="flag">High</span>}
+            {task.notes && <span className="muted" title={task.notes}>✎</span>}
+            <DueLabel due={task.due_at} />
+          </>}
         </span>
       </div>
       {task.item_id && (
-        <a className="task-link" href={task.item_url ?? undefined} target="_blank" rel="noreferrer"
-           title={task.item_account ?? ''}>
-          <span className="dot" style={{ background: task.item_color ?? 'var(--muted)' }} />
-          <span className="grow">{task.item_title || '(no subject)'}</span>
-          {task.item_state === 'archived' && <span className="muted">archived</span>}
-        </a>
+        <div className={`task-link tinted${reading ? ' open' : ''}`} style={accountStyle(task.item_color)}>
+          <div className="task-link-line">
+            <button className="task-link-open" onClick={onToggleRead} aria-expanded={reading} title={task.item_account ?? ''}>
+              <span className="grow">{task.item_title || '(no subject)'}</span>
+              {task.item_state === 'archived' && <span className="muted">archived</span>}
+            </button>
+            {task.item_url && (
+              <a className="row-action small" href={task.item_url} target="_blank" rel="noreferrer"
+                 title={`Open in ${externalName(task.item_url)}`} aria-label={`Open in ${externalName(task.item_url)}`}>
+                <ExternalIcon />
+              </a>
+            )}
+          </div>
+          {reading && <ReadingPane itemId={task.item_id} kind={task.item_kind ?? 'email'} url={task.item_url} />}
+        </div>
       )}
-      {editing && <TaskEditor task={task} onChanged={onChanged} onError={onError} />}
+      {editing && !done && <TaskEditor task={task} onChanged={onChanged} onError={onError} />}
     </li>
   )
 }

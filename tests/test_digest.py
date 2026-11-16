@@ -147,5 +147,5 @@ def test_digest_api(client, conn, monkeypatch):
     out = client.post("/api/digest", json={"raw_text": DIGEST}).json()
     assert out["created"] == 2
     assert client.post("/api/digest", json={"raw_text": DIGEST, "digest_date": "x"}).status_code == 422
-    listed = client.get("/api/items?account=Work").json()
+    listed = client.get("/api/items?account=Work").json()["items"]
     assert {i["kind"] for i in listed} == {"digest"}

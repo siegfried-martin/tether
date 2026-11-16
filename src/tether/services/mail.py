@@ -105,6 +105,17 @@ async def get_thread(conn: sqlite3.Connection, gmail: GmailFactory, account: str
     }
 
 
+async def get_item_thread(conn: sqlite3.Connection, gmail: GmailFactory, item_id: int) -> dict:
+    """The thread behind an email item, for reading it inside Tether."""
+    item = items.get_by_id(conn, item_id)
+    if item is None:
+        raise MailError(f"no item {item_id}", status=404)
+    acct = accounts.get_account(conn, item["account_id"])
+    if item["kind"] != "email" or acct is None or acct["kind"] != "gmail":
+        raise MailError("only Gmail threads can be read in Tether", status=422)
+    return await get_thread(conn, gmail, acct["label"], item["external_id"])
+
+
 def thread_text(thread: dict, *, body_cap: int = BODY_CAP) -> dict:
     messages = [m for m in thread.get("messages", []) if "DRAFT" not in m.get("labelIds", [])]
     messages.sort(key=lambda m: int(m.get("internalDate", 0)))

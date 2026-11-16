@@ -7,8 +7,20 @@ from tether.crypto import Vault
 from tether.db import tx, utcnow
 from tether.services import sync_state
 
-# Account colors, assigned in order of creation.
-PALETTE = ["#2f6fdb", "#d9480f", "#2b8a3e", "#ae3ec9", "#e8590c", "#0c8599", "#c2255c", "#5f3dc4"]
+# Account colors, assigned in order of creation. Drawn from the Okabe-Ito palette, which stays
+# distinct under red-green color blindness: blue, orange, pink, teal, gold, sky, vermillion, gray.
+PALETTE = ["#0072b2", "#e69f00", "#cc79a7", "#009e73", "#d4b000", "#56b4e9", "#d55e00", "#6b7280"]
+WORK_KINDS = ("ics", "digest")
+
+
+def next_color(conn: sqlite3.Connection, kind: str) -> str:
+    """The color for a new account. The work calendar feed and work digest share one color."""
+    if kind in WORK_KINDS:
+        row = conn.execute(f"SELECT color FROM account WHERE kind IN {WORK_KINDS} ORDER BY id LIMIT 1").fetchone()
+        if row:
+            return row["color"]
+    count = conn.execute("SELECT COUNT(*) FROM account").fetchone()[0]
+    return PALETTE[count % len(PALETTE)]
 
 DEFAULT_EXCLUDED_CATEGORIES = "promotions,social,forums"
 GMAIL_CATEGORIES = ("personal", "updates", "promotions", "social", "forums")
@@ -99,10 +111,9 @@ def upsert_gmail_account(
             account_id = row["id"]
             conn.execute("UPDATE account SET status = 'ok' WHERE id = ?", (account_id,))
         else:
-            count = conn.execute("SELECT COUNT(*) FROM account").fetchone()[0]
             account_id = conn.execute(
                 "INSERT INTO account (kind, label, color, excluded_categories) VALUES ('gmail', ?, ?, ?)",
-                (email, PALETTE[count % len(PALETTE)], DEFAULT_EXCLUDED_CATEGORIES),
+                (email, next_color(conn, "gmail"), DEFAULT_EXCLUDED_CATEGORIES),
             ).lastrowid
         _save_credential(conn, vault, account_id, secret, scopes)
     return account_id

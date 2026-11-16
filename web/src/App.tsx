@@ -1,32 +1,25 @@
 import { useEffect, useState } from 'react'
-import { get, patch, post, type Account, type Item, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
-import { errorText, relativeTime, ToastView, usePolling, useToast } from './shared'
+import { get, patch, post, type Account, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
+import { accountStyle, DueLabel, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
 import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
-import { DueLabel, TasksPage } from './Tasks'
+import { TasksPage } from './Tasks'
+import { ExternalIcon, externalName, ReadingPane } from './Mail'
+import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location } from './route'
 
-function useRoute(): [string, (path: string) => void] {
-  const [path, setPath] = useState(location.pathname)
-  useEffect(() => {
-    const onPop = () => setPath(location.pathname)
-    addEventListener('popstate', onPop)
-    return () => removeEventListener('popstate', onPop)
-  }, [])
-  const navigate = (to: string) => {
-    history.pushState(null, '', to)
-    setPath(to)
-  }
-  return [path, navigate]
-}
+const NAV = [['inbox', 'Inbox'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['settings', 'Settings']] as const
 
 export default function App() {
   const [me, setMe] = useState<string | null | undefined>(undefined)
-  const [path, navigate] = useRoute()
+  const loc = useLocation()
+  const page = pageOf(loc.path)
 
   useEffect(() => {
     get<{ email: string }>('/api/me')
       .then((r) => setMe(r.email))
       .catch(() => setMe(null))
   }, [])
+  // "/" (and anything unknown) goes back to where you were last.
+  useEffect(() => { if (me && !page) navigate(lastLocation(), { replace: true }) }, [me, page])
 
   if (me === undefined) return <main className="center muted">Loading…</main>
   if (me === null) return <Login />
@@ -34,17 +27,19 @@ export default function App() {
   return (
     <div className="app">
       <header className="bar">
-        <a href="/" className="brand" onClick={(e) => { e.preventDefault(); navigate('/') }}>Tether</a>
+        <a className="brand" {...linkProps('/inbox')}>
+          <img src="/icon.svg" alt="" width="28" height="28" /><span className="brand-name">Tether</span>
+        </a>
         <nav>
-          {([['/', 'Inbox'], ['/tasks', 'Tasks'], ['/calendar', 'Calendar'], ['/settings', 'Settings']] as const).map(([to, label]) => (
-            <a key={to} href={to} className={path === to ? 'active' : ''}
-               onClick={(e) => { e.preventDefault(); navigate(to) }}>{label}</a>
+          {NAV.map(([to, label]) => (
+            <a key={to} className={page === to ? 'active' : ''} {...linkProps(`/${to}`)}>{label}</a>
           ))}
         </nav>
       </header>
-      {path === '/settings' ? <Settings onSignedOut={() => setMe(null)} />
-        : path === '/tasks' ? <TasksPage />
-        : path === '/calendar' ? <CalendarPage /> : <Home onCalendar={() => navigate('/calendar')} />}
+      {page === 'settings' ? <Settings onSignedOut={() => setMe(null)} />
+        : page === 'tasks' ? <TasksPage loc={loc} />
+        : page === 'calendar' ? <CalendarPage loc={loc} />
+        : page === 'inbox' ? <Home loc={loc} /> : null}
     </div>
   )
 }
@@ -52,24 +47,25 @@ export default function App() {
 function Login() {
   return (
     <main className="center login">
+      <img src="/icon.svg" alt="" width="72" height="72" />
       <h1>Tether</h1>
       <a className="button" href="/auth/login">Sign in with Google</a>
     </main>
   )
 }
 
-type Tab = 'open' | 'archived'
-
-function Home({ onCalendar }: { onCalendar: () => void }) {
+function Home({ loc }: { loc: Location }) {
+  const tab = loc.path === '/inbox/archived' ? 'archived' : 'open'
+  const account = loc.params.get('account')
+  const page = pageParam(loc.params)
   const overview = usePolling<Overview>('/api/overview')
   const accountList = usePolling<Account[]>('/api/accounts')
-  const [tab, setTab] = useState<Tab>('open')
-  const [account, setAccount] = useState<string | null>(null)
-  const query = new URLSearchParams({ state: tab, limit: tab === 'open' ? '200' : '100' })
+  const query = new URLSearchParams({ state: tab, limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) })
   if (account) query.set('account', account)
-  const list = usePolling<Item[]>(`/api/items?${query}`)
+  const list = usePolling<ItemPage>(`/api/items?${query}`)
   // Rows moved out of this view, hidden at once while the server catches up.
   const [moved, setMoved] = useState<Set<number>>(new Set())
+  const [reading, setReading] = useState<number | null>(null)
   const [toast, setToast] = useToast()
 
   const refresh = () => { list.reload(); overview.reload() }
@@ -123,34 +119,37 @@ function Home({ onCalendar }: { onCalendar: () => void }) {
   }
 
   const counts = overview.data?.inbox
-  const shown = list.data?.filter((i) => !moved.has(i.id))
+  const shown = list.data?.items.filter((i) => !moved.has(i.id))
   const accountsSeen = accountList.data ?? []
   const total = counts && (account ? counts.by_account[account] ?? 0 : counts.count)
+  const tabPath = (state: 'open' | 'archived') =>
+    (state === 'open' ? '/inbox' : '/inbox/archived') + (account ? `?account=${encodeURIComponent(account)}` : '')
+  const filterPath = (label: string | null) => withParams({ account: label, page: null })
 
   return (
     <main>
       {overview.data && <Urgent urgent={overview.data.urgent} onComplete={completeTask} />}
-      {overview.data?.calendar && <TodayCard events={overview.data.calendar.today} onOpen={onCalendar} />}
+      {overview.data?.calendar && <TodayCard events={overview.data.calendar.today} />}
       <section>
         <div className="inbox-head">
           <div className="tabs" role="tablist">
-            <button role="tab" aria-selected={tab === 'open'} onClick={() => setTab('open')}>
+            <a role="tab" aria-selected={tab === 'open'} {...linkProps(tabPath('open'))}>
               Inbox {total !== undefined && <span className="count">{total}</span>}
-            </button>
-            <button role="tab" aria-selected={tab === 'archived'} onClick={() => setTab('archived')}>
+            </a>
+            <a role="tab" aria-selected={tab === 'archived'} {...linkProps(tabPath('archived'))}>
               Archived
-            </button>
+            </a>
           </div>
           {accountsSeen.length > 1 && (
             <div className="chips" aria-label="Filter by account">
-              <button className="chip" aria-pressed={account === null} onClick={() => setAccount(null)}>All</button>
+              <a className="chip" aria-pressed={account === null} {...linkProps(filterPath(null))}>All</a>
               {accountsSeen.map((a) => (
-                <button key={a.id} className="chip" aria-pressed={account === a.label} title={a.label}
-                        onClick={() => setAccount(account === a.label ? null : a.label)}>
-                  <span className="dot" style={{ background: a.color }} />
+                <a key={a.id} className="chip" aria-pressed={account === a.label} title={a.label} style={accountStyle(a.color)}
+                   {...linkProps(filterPath(account === a.label ? null : a.label))}>
+                  <span className="dot" />
                   {a.label}
                   {tab === 'open' && <span className="chip-count">{counts?.by_account[a.label] ?? 0}</span>}
-                </button>
+                </a>
               ))}
             </div>
           )}
@@ -159,10 +158,13 @@ function Home({ onCalendar }: { onCalendar: () => void }) {
         {shown?.length === 0 && <p className="muted">{tab === 'open' ? 'Nothing open.' : 'Nothing archived yet.'}</p>}
         <ul className="items">
           {shown?.map((item) => (
-            <ItemRow key={item.id} item={item} onTask={() => makeTask(item)}
+            <ItemRow key={item.id} item={item} open={reading === item.id}
+                     onToggle={() => setReading(reading === item.id ? null : item.id)}
+                     onTask={() => makeTask(item)}
                      onAction={() => act(item, item.state === 'open' ? 'archive' : 'unarchive')} />
           ))}
         </ul>
+        {list.data && <Pager page={page} total={list.data.total} onPage={(n) => navigate(withParams({ page: n > 1 ? n : null }))} />}
       </section>
       <ToastView toast={toast} />
     </main>
@@ -183,8 +185,8 @@ function Urgent({ urgent, onComplete }: { urgent: Overview['urgent']; onComplete
         </div>
       ))}
       {urgent.items.map((i) => (
-        <a key={`i${i.id}`} className="urgent-row" href={i.url ?? undefined} target="_blank" rel="noreferrer">
-          <span className="dot" style={{ background: i.account_color }} />
+        <a key={`i${i.id}`} className="urgent-row tinted" style={accountStyle(i.account_color)}
+           href={i.url ?? undefined} target="_blank" rel="noreferrer">
           <span className="grow">{i.title}</span>
           {i.priority === 'high' && <span className="flag">High</span>}
           <DueLabel due={i.due_at} />
@@ -214,41 +216,47 @@ const InboxIcon = () => (
   </svg>
 )
 
-function ItemRow({ item, onAction, onTask }: { item: Item; onAction: () => void; onTask: () => void }) {
-  const body = (
-    <>
-      <span className="swatch" style={{ background: item.account_color }} title={item.account} />
-      <span className="item-main">
-        <span className="sender">
-          {item.last_direction === 'out' ? '↗ ' : ''}{item.sender || item.account}
-          {item.open_tasks > 0 && <span className="task-badge" title="Has an open task">task</span>}
-        </span>
-        <span className="subject">
-          <span className="title">{item.title}</span>
-          {item.snippet && <span className="snippet">{item.snippet}</span>}
-        </span>
-        <span className="item-time">
-          {item.priority === 'high' && <span className="flag">High</span>}
-          <DueLabel due={item.due_at} />
-          <time dateTime={item.last_activity_at}>{relativeTime(item.last_activity_at)}</time>
-        </span>
-      </span>
-    </>
-  )
+function ItemRow({ item, open, onToggle, onAction, onTask }: {
+  item: Item; open: boolean; onToggle: () => void; onAction: () => void; onTask: () => void
+}) {
   const archive = item.state === 'open'
   return (
-    <li className="item-row">
-      {item.url ? <a className="item" href={item.url} target="_blank" rel="noreferrer">{body}</a>
-                : <div className="item">{body}</div>}
-      {item.open_tasks === 0 && item.state === 'open' && (
-        <button className="row-action" onClick={onTask} title="Make a task" aria-label={`Make a task: ${item.title}`}>
-          <TaskIcon />
+    <li className={`item-row${open ? ' open' : ''}`} style={accountStyle(item.account_color)}>
+      <div className="item-line">
+        <button className="item" onClick={onToggle} aria-expanded={open} title={item.account}>
+          <span className="item-main">
+            <span className="sender">
+              {item.last_direction === 'out' ? '↗ ' : ''}{item.sender || item.account}
+              {item.open_tasks > 0 && <span className="task-badge" title="Has an open task">task</span>}
+            </span>
+            <span className="subject">
+              <span className="title">{item.title}</span>
+              {item.snippet && <span className="snippet">{item.snippet}</span>}
+            </span>
+            <span className="item-time">
+              {item.priority === 'high' && <span className="flag">High</span>}
+              <DueLabel due={item.due_at} />
+              <time dateTime={item.last_activity_at}>{relativeTime(item.last_activity_at)}</time>
+            </span>
+          </span>
         </button>
-      )}
-      <button className="row-action" onClick={onAction}
-              title={archive ? 'Archive' : 'Move to inbox'} aria-label={`${archive ? 'Archive' : 'Move to inbox'}: ${item.title}`}>
-        {archive ? <ArchiveIcon /> : <InboxIcon />}
-      </button>
+        {item.url && (
+          <a className="row-action" href={item.url} target="_blank" rel="noreferrer"
+             title={`Open in ${externalName(item.url)}`} aria-label={`Open in ${externalName(item.url)}: ${item.title}`}>
+            <ExternalIcon />
+          </a>
+        )}
+        {item.open_tasks === 0 && item.state === 'open' && (
+          <button className="row-action" onClick={onTask} title="Make a task" aria-label={`Make a task: ${item.title}`}>
+            <TaskIcon />
+          </button>
+        )}
+        <button className="row-action" onClick={onAction}
+                title={archive ? 'Archive' : 'Move to inbox'} aria-label={`${archive ? 'Archive' : 'Move to inbox'}: ${item.title}`}>
+          {archive ? <ArchiveIcon /> : <InboxIcon />}
+        </button>
+      </div>
+      {open && <ReadingPane itemId={item.id} kind={item.kind} url={item.url} digest={item} />}
     </li>
   )
 }

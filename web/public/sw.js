@@ -1,5 +1,5 @@
 // Tether service worker: caches the app shell only, never API responses.
-const CACHE = 'tether-shell-v1'
+const CACHE = 'tether-shell-v2'
 const NEVER = ['/api/', '/auth/', '/accounts/']
 
 self.addEventListener('install', (event) => {

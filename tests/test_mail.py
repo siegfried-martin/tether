@@ -101,6 +101,21 @@ async def test_get_thread_text(conn, mailboxes):
     assert len(out["messages"]) == 2, "drafts are left out"
 
 
+async def test_get_item_thread(conn, mailboxes):
+    mailboxes[1].put("t", full_msg("m1", "t", labels=["INBOX"], plain="Hello"))
+    item = items.upsert_item(conn, account_id=1, external_id="t", kind="email", fields={
+        "last_activity_at": "2026-11-15T10:00:00Z", "last_direction": "in"}).id
+    out = await mail.get_item_thread(conn, gmail_for(mailboxes), item)
+    assert out["item_id"] == item and out["messages"][0]["body"] == "Hello"
+    with pytest.raises(mail.MailError, match="no item"):
+        await mail.get_item_thread(conn, gmail_for(mailboxes), 999)
+    digest = conn.execute("INSERT INTO account (kind, label, color) VALUES ('digest', 'Work', '#000')").lastrowid
+    note = items.upsert_item(conn, account_id=digest, external_id="d", kind="digest", fields={
+        "last_activity_at": "2026-11-15T10:00:00Z", "last_direction": "in"}).id
+    with pytest.raises(mail.MailError, match="only Gmail"):
+        await mail.get_item_thread(conn, gmail_for(mailboxes), note)
+
+
 async def test_get_thread_caps_body(conn, mailboxes):
     mailboxes[1].put("t", full_msg("m1", "t", labels=["INBOX"], plain="x" * 50))
     [m] = (await mail.get_thread(conn, gmail_for(mailboxes), "home@x.com", "t", body_cap=10))["messages"]
