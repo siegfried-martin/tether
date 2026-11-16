@@ -69,7 +69,7 @@ function range(view: View, anchor: string): [string, string] {
   switch (view) {
     case 'day': return [anchor, anchor]
     case '3day': return [anchor, plusDays(anchor, 2)]
-    case 'workweek': { const mon = plusDays(anchor, -((dow + 6) % 7)); return [mon, plusDays(mon, 4)] }
+    case 'workweek': { const mon = plusDays(anchor, 1 - dow); return [mon, plusDays(mon, 4)] }   // the Mon–Fri of that Sunday week
     case 'week': { const sun = plusDays(anchor, -dow); return [sun, plusDays(sun, 6)] }
     case 'schedule': return [anchor, plusDays(anchor, 13)]
   }
@@ -318,10 +318,66 @@ function bannerSpan(e: AgendaEvent, dayList: string[]): [number, number] | null 
   return b > a ? [a, b] : null
 }
 
+type Banner = { e: AgendaEvent; span: [number, number] }
+
+/** Rows for all-day events: each goes in the first row where it overlaps nothing, longest first. */
+function bannerLanes(banners: Banner[]): (Banner & { lane: number })[] {
+  const sorted = [...banners].sort((a, b) =>
+    a.span[0] - b.span[0] || (b.span[1] - b.span[0]) - (a.span[1] - a.span[0]) || a.e.title.localeCompare(b.e.title))
+  const ends: number[] = []   // per lane, the first free day
+  return sorted.map((b) => {
+    let lane = ends.findIndex((end) => end <= b.span[0])
+    if (lane < 0) lane = ends.length
+    ends[lane] = b.span[1]
+    return { ...b, lane }
+  })
+}
+
+const COLLAPSED_LANES = 2
+
+/**
+ * The all-day strip. Collapsed, it shows two rows and then a "+N more" for each day
+ * with more than that; a tap on the strip (outside an event) or on the arrow opens every row.
+ */
+function AllDay({ banners, dayCount, expanded, onToggle, onPick }: {
+  banners: Banner[]; dayCount: number; expanded: boolean; onToggle: () => void; onPick: (e: AgendaEvent) => void
+}) {
+  const placed = bannerLanes(banners)
+  const lanes = Math.max(...placed.map((b) => b.lane)) + 1
+  // A third row is cheaper than a "+N more" row standing in for it.
+  const collapsible = lanes > COLLAPSED_LANES + 1
+  const shown = !collapsible || expanded ? lanes : COLLAPSED_LANES
+  const hidden = Array.from({ length: dayCount }, (_, day) =>
+    placed.filter((b) => b.lane >= shown && b.span[0] <= day && day < b.span[1]).length)
+  return (
+    <>
+      <button className="cal-gutter all-day-label" onClick={collapsible ? onToggle : undefined}
+              aria-expanded={collapsible ? expanded : undefined} disabled={!collapsible}>
+        all day{collapsible && <span className="chevron">{expanded ? '▴' : '▾'}</span>}
+      </button>
+      <div className={`cal-banners${collapsible ? ' collapsible' : ''}${expanded ? ' expanded' : ''}`}
+           style={{ gridColumn: `2 / span ${dayCount}`, gridTemplateColumns: `repeat(${dayCount}, minmax(0, 1fr))` }}
+           onClick={(ev) => { if (collapsible && !(ev.target as HTMLElement).closest('.banner')) onToggle() }}>
+        {placed.filter((b) => b.lane < shown).map(({ e, span, lane }) => (
+          <button key={e.id} className={`banner tinted ${e.busy}`}
+                  style={{ ...eventStyle(e), gridColumn: `${span[0] + 1} / ${span[1] + 1}`, gridRow: lane + 1 }}
+                  onClick={() => onPick(e)} title={e.title}>
+            {e.title}
+          </button>
+        ))}
+        {shown < lanes && hidden.map((n, day) => n > 0 && (
+          <span key={day} className="banner-more" style={{ gridColumn: day + 1, gridRow: shown + 1 }}>+{n} more</span>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
   days: string[]; events: AgendaEvent[]; today: string; onPick: (e: AgendaEvent) => void; onDay: (day: string) => void
 }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const [allDayOpen, setAllDayOpen] = useState(false)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000)
@@ -340,7 +396,7 @@ function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
 
   const banners = events.filter(isBanner)
     .map((e) => ({ e, span: bannerSpan(e, dayList) }))
-    .filter((b): b is { e: AgendaEvent; span: [number, number] } => b.span !== null)
+    .filter((b): b is Banner => b.span !== null)
   const timed = events.filter((e) => !isBanner(e))
   const cols = { gridTemplateColumns: `var(--gutter) repeat(${dayList.length}, minmax(0, 1fr))` }
   const nowMinutes = now.getHours() * 60 + now.getMinutes()
@@ -360,18 +416,8 @@ function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
           )
         })}
         {banners.length > 0 && (
-          <>
-            <div className="cal-gutter all-day-label">all day</div>
-            <div className="cal-banners" style={{ gridColumn: `2 / span ${dayList.length}`,
-                                                   gridTemplateColumns: `repeat(${dayList.length}, minmax(0, 1fr))` }}>
-              {banners.map(({ e, span }) => (
-                <button key={e.id} className={`banner tinted ${e.busy}`} style={{ ...eventStyle(e), gridColumn: `${span[0] + 1} / ${span[1] + 1}` }}
-                        onClick={() => onPick(e)} title={e.title}>
-                  {e.title}
-                </button>
-              ))}
-            </div>
-          </>
+          <AllDay banners={banners} dayCount={dayList.length} expanded={allDayOpen}
+                  onToggle={() => setAllDayOpen(!allDayOpen)} onPick={onPick} />
         )}
       </div>
       <div className="cal-body" style={{ ...cols, height: 24 * HOUR }}>

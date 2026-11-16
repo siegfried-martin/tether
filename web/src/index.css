@@ -7,8 +7,8 @@
   --accent: #2f6fdb;
   --urgent-bg: #fff1f0;
   --urgent-text: #a8071a;
-  --tint: 14%;          /* how strongly an account's color tints its rows */
-  --tint-hover: 24%;
+  --tint: 22%;          /* how strongly an account's color tints its rows; 22% keeps the palette apart for deuteranomaly */
+  --tint-hover: 32%;
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.4;
@@ -23,8 +23,8 @@
     --accent: #7aa7ff;
     --urgent-bg: #3a1518;
     --urgent-text: #ffb3b8;
-    --tint: 22%;
-    --tint-hover: 32%;
+    --tint: 26%;
+    --tint-hover: 36%;
   }
 }
 * { box-sizing: border-box; }
@@ -106,9 +106,20 @@ h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; colo
 .toast button.link { color: var(--bg); font-weight: 700; text-decoration: underline; }
 .error-toast { background: var(--urgent-bg); color: var(--urgent-text); }
 
-.color-pick { position: relative; display: inline-flex; cursor: pointer; }
-.color-pick input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; padding: 0; border: 0; }
-.accounts .color-pick .swatch { width: 16px; height: 16px; }
+.color-pick { position: relative; display: inline-flex; }
+.color-button { background: none; border: 0; padding: 4px; cursor: pointer; display: inline-flex; border-radius: 6px; }
+.color-button:hover { background: var(--surface); }
+.accounts .color-pick .swatch { width: 18px; height: 18px; }
+.color-menu {
+  position: absolute; z-index: 5; top: 100%; left: 0; display: grid; grid-template-columns: repeat(2, 7.5rem); gap: 4px;
+  padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.color-choice {
+  font: inherit; font-size: 0.88rem; font-weight: 600; text-align: left; color: var(--text); padding: 6px 8px;
+  border-top: 0; border-right: 0; border-bottom: 0; border-radius: 4px; cursor: pointer;
+}
+.color-choice.custom { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; background: var(--surface); }
+.color-choice.custom input { width: 2.2rem; height: 1.5rem; padding: 0; border: 0; background: none; cursor: pointer; }
 .swatch { flex: none; width: 4px; border-radius: 2px; align-self: stretch; min-height: 16px; }
 .accounts .swatch { width: 10px; height: 10px; border-radius: 50%; align-self: center; min-height: 0; }
 .item-main {
@@ -373,12 +384,23 @@ button.link.danger { color: var(--urgent-text); }
 .cal-day-head.today .dow { color: var(--accent); font-weight: 700; }
 .cal-day-head.today .dom { background: var(--accent); color: #fff; font-weight: 600; }
 .cal-day-head.past .dom { color: var(--muted); }
-.all-day-label { font-size: 0.68rem; color: var(--muted); text-align: right; padding: 4px 6px 0 0; }
-.cal-banners { display: grid; grid-auto-flow: row dense; gap: 2px; padding: 2px 0 4px; max-height: 7.5rem; overflow-y: auto; }
+.all-day-label {
+  font: inherit; font-size: 0.68rem; color: var(--muted); text-align: right; padding: 6px 6px 0 0; background: none; border: 0;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px; cursor: pointer;
+}
+.all-day-label:disabled { cursor: default; }
+.all-day-label .chevron { font-size: 0.9rem; line-height: 1; color: var(--text); }
+.cal-banners { display: grid; grid-auto-rows: 22px; row-gap: 2px; padding: 3px 0 5px; }
+.cal-banners.collapsible { cursor: pointer; }
+.cal-banners.expanded { max-height: 40vh; overflow-y: auto; }
+.banner-more {
+  font-size: 0.75rem; font-weight: 600; color: var(--muted); padding: 2px 8px; line-height: 18px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .banner {
   min-width: 0; font: inherit; font-size: 0.8rem; font-weight: 600; text-align: left; color: var(--text); padding: 2px 6px;
   border-top: 0; border-right: 0; border-bottom: 0; border-radius: 4px; margin: 0 2px; cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; height: 22px;
 }
 .cal-body { display: grid; position: relative; }
 .cal-gutter { min-width: 0; }
@@ -396,9 +418,9 @@ button.link.danger { color: var(--urgent-text); }
   font: inherit; font-size: 0.78rem; line-height: 1.25; text-align: left; color: var(--text); overflow: hidden;
   border-top: 0; border-bottom: 0; border-right: 0; border-left-width: 4px; border-radius: 4px; cursor: pointer;
   box-shadow: 0 0 0 1px var(--bg);
-  background: color-mix(in srgb, var(--acct) calc(var(--tint) + 14%), var(--bg));
+  background: color-mix(in srgb, var(--acct) calc(var(--tint) + 8%), var(--bg));
 }
-.slot:hover, .banner:hover { background: color-mix(in srgb, var(--acct) calc(var(--tint-hover) + 14%), var(--bg)); z-index: 1; }
+.slot:hover, .banner:hover { background: color-mix(in srgb, var(--acct) calc(var(--tint-hover) + 8%), var(--bg)); z-index: 1; }
 .slot-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .slot-time, .slot-where { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .slot.short { flex-direction: row; gap: 6px; align-items: baseline; padding-top: 1px; }
@@ -409,7 +431,7 @@ button.link.danger { color: var(--urgent-text); }
                                         color-mix(in srgb, var(--acct) 12%, var(--bg)) 5px 10px);
 }
 .slot.tentative .slot-title { font-style: italic; }
-.slot.free, .banner.free { background: var(--bg); border: 1px dashed var(--acct); border-left: 4px solid var(--acct); }
+.slot.free, .banner.free { background: color-mix(in srgb, var(--acct) calc(var(--tint) / 2), var(--bg)); border: 1px dashed var(--acct); border-left: 4px solid var(--acct); }
 .slot.past { opacity: 0.6; }
 .slot[style*="--acct2"], .banner[style*="--acct2"], .event[style*="--acct2"] { box-shadow: inset -4px 0 0 var(--acct2), 0 0 0 1px var(--bg); }
 .now-line { position: absolute; left: -1px; right: 0; height: 2px; background: #d93025; z-index: 1; pointer-events: none; }

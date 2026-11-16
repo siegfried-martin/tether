@@ -85,6 +85,13 @@ export function Pager({ page, total, onPage }: { page: number; total: number; on
 }
 
 /** Inline style that gives a row its account's color: a solid edge and a tinted background. */
+/** Account colors, named so they can be picked without telling them apart. Mirrors PALETTE in services/accounts.py. */
+export const PALETTE = [
+  { hex: '#4377f0', name: 'Blue' }, { hex: '#b23b19', name: 'Rust' }, { hex: '#b0267c', name: 'Magenta' },
+  { hex: '#48cba1', name: 'Mint' }, { hex: '#ee9e10', name: 'Amber' }, { hex: '#21c5e5', name: 'Cyan' },
+  { hex: '#2e7a50', name: 'Forest' }, { hex: '#6b7280', name: 'Gray' },
+]
+
 export function accountStyle(color: string | null | undefined): React.CSSProperties {
   return { '--acct': color ?? 'var(--muted)' } as React.CSSProperties
 }

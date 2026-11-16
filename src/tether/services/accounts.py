@@ -7,9 +7,11 @@ from tether.crypto import Vault
 from tether.db import tx, utcnow
 from tether.services import sync_state
 
-# Account colors, assigned in order of creation. Drawn from the Okabe-Ito palette, which stays
-# distinct under red-green color blindness: blue, orange, pink, teal, gold, sky, vermillion, gray.
-PALETTE = ["#0072b2", "#e69f00", "#cc79a7", "#009e73", "#d4b000", "#56b4e9", "#d55e00", "#6b7280"]
+# Account colors, assigned in order of creation: blue, rust, magenta, mint, amber, then cyan,
+# forest and gray for later accounts. Chosen by search to stay apart under simulated
+# deuteranomaly, both as solid edges and as the pale tints across whole rows (the hard case).
+# Mirrored in web/src/shared.tsx for the color picker.
+PALETTE = ["#4377f0", "#b23b19", "#b0267c", "#48cba1", "#ee9e10", "#21c5e5", "#2e7a50", "#6b7280"]
 WORK_KINDS = ("ics", "digest")
 
 

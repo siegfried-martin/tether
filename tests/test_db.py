@@ -70,7 +70,7 @@ def test_rebuild_migration_keeps_rows_and_foreign_keys(tmp_path):
 
 
 def test_palette_migration_and_work_color(tmp_path):
-    """0007 moves default colors to the color-blind-safe palette; work accounts share a color."""
+    """0007 and 0008 move default colors to the deuteranomaly palette; work accounts share a color."""
     from tether import db as dbmod
     from tether.services import accounts
     c = sqlite3.connect(tmp_path / "p.db", isolation_level=None)
@@ -84,6 +84,6 @@ def test_palette_migration_and_work_color(tmp_path):
     c.close()
     c = dbmod.connect(tmp_path / "p.db")
     assert [r[0] for r in c.execute("SELECT color FROM account ORDER BY id")] == \
-        ["#0072b2", "#123456", "#d4b000", "#d4b000"]
-    assert accounts.next_color(c, "digest") == "#d4b000"
+        ["#4377f0", "#123456", "#ee9e10", "#ee9e10"]
+    assert accounts.next_color(c, "digest") == "#ee9e10"
     assert accounts.next_color(c, "gmail") == accounts.PALETTE[4]
