@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, patch, post, type Account, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
-import { accountStyle, DueLabel, PALETTE, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
+import { accountStyle, DueLabel, PALETTE, useSwipe, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
 import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
 import { TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
@@ -9,11 +9,26 @@ import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, typ
 
 const NAV = [['inbox', 'Inbox'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['settings', 'Settings']] as const
 
+const NAV_ICONS: Record<(typeof NAV)[number][0], React.ReactNode> = {
+  inbox: <><path d="M3 13h5l1.5 3h5l1.5-3h5" /><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z" /></>,
+  tasks: <><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><path d="M8 12.5l2.8 2.8L16 9.5" /></>,
+  calendar: <><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>,
+  settings: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2.2" /><circle cx="9" cy="17" r="2.2" /></>,
+}
+
 export default function App() {
   const [me, setMe] = useState<string | null | undefined>(undefined)
   const loc = useLocation()
   const page = pageOf(loc.path)
   const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null)   // where a page can put controls in the header
+  // On a phone, a swipe across the header moves to the next or previous page.
+  const swipePage = useRef<(dir: 1 | -1) => void>(() => {})
+  swipePage.current = (dir) => {
+    const at = NAV.findIndex(([to]) => to === page)
+    const next = NAV[at + dir]
+    if (at >= 0 && next) navigate(`/${next[0]}`)
+  }
+  const barSwipe = useSwipe(swipePage, { follow: false })
 
   useEffect(() => {
     get<{ email: string }>('/api/me')
@@ -28,14 +43,19 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="bar">
+      <header className="bar" ref={barSwipe}>
         <a className="brand" {...linkProps('/inbox')}>
           <img src="/icon.svg" alt="" width="28" height="28" /><span className="brand-name">Tether</span>
         </a>
         <div className="bar-slot" ref={setBarSlot} />
         <nav>
           {NAV.map(([to, label]) => (
-            <a key={to} className={page === to ? 'active' : ''} {...linkProps(`/${to}`)}>{label}</a>
+            <a key={to} className={page === to ? 'active' : ''} aria-current={page === to ? 'page' : undefined}
+               {...linkProps(`/${to}`)}>
+              <svg className="nav-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none"
+                   stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{NAV_ICONS[to]}</svg>
+              {label}
+            </a>
           ))}
         </nav>
       </header>

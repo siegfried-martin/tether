@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { patch, post, type AgendaEvent, type CalendarStatus, type Hold } from './api'
-import { accountStyle, errorText, Linkified, SHORT_SCREEN, useMedia, usePolling } from './shared'
+import { accountStyle, errorText, Linkified, SHORT_SCREEN, useMedia, usePolling, useSwipe } from './shared'
 import { linkProps, navigate, type Location } from './route'
 
 // ------------------------------------------------------------------ dates
@@ -155,67 +155,6 @@ export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLEle
       {picked && <EventDetail event={picked} onClose={() => setPicked(null)} />}
     </main>
   )
-}
-
-/**
- * Swipe left for the next range and right for the previous one. The view follows the
- * finger while it moves sideways, then slides in from that side when the swipe counts.
- * Mostly-vertical drags are left to scrolling.
- */
-function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => void>) {
-  const [el, setEl] = useState<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!el) return
-    let x0 = 0, y0 = 0, t0 = 0, axis: 'x' | 'y' | null = null, dx = 0
-    const reset = (animate: boolean) => {
-      el.style.transition = animate ? 'transform 160ms ease-out, opacity 160ms ease-out' : ''
-      el.style.transform = ''
-      el.style.opacity = ''
-    }
-    const start = (e: TouchEvent) => {
-      if (e.touches.length !== 1) { axis = 'y'; return }
-      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = e.timeStamp; axis = null; dx = 0
-    }
-    const move = (e: TouchEvent) => {
-      if (axis === 'y' || e.touches.length !== 1) return
-      dx = e.touches[0].clientX - x0
-      const dy = e.touches[0].clientY - y0
-      if (!axis) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
-        axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y'
-        if (axis === 'y') return
-      }
-      e.preventDefault()   // keep a sideways drag from scrolling or going back a page
-      el.style.transition = ''
-      el.style.transform = `translateX(${dx}px)`
-      el.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / el.clientWidth))
-    }
-    const end = (e: TouchEvent) => {
-      if (axis !== 'x') return
-      axis = null
-      const fast = Math.abs(dx) > 40 && e.timeStamp - t0 < 300
-      if (Math.abs(dx) < el.clientWidth * 0.22 && !fast) { reset(true); return }
-      const dir = dx < 0 ? 1 : -1
-      // Jump to the far side, then glide back into place with the new range.
-      el.style.transition = ''
-      el.style.transform = `translateX(${dir * 40}%)`
-      el.style.opacity = '0.4'
-      onSwipe.current(dir)
-      requestAnimationFrame(() => requestAnimationFrame(() => reset(true)))
-    }
-    const cancel = () => { axis = null; reset(true) }
-    el.addEventListener('touchstart', start, { passive: true })
-    el.addEventListener('touchmove', move, { passive: false })
-    el.addEventListener('touchend', end)
-    el.addEventListener('touchcancel', cancel)
-    return () => {
-      el.removeEventListener('touchstart', start)
-      el.removeEventListener('touchmove', move)
-      el.removeEventListener('touchend', end)
-      el.removeEventListener('touchcancel', cancel)
-    }
-  }, [el, onSwipe])
-  return setEl
 }
 
 // ------------------------------------------------------------------ schedule
