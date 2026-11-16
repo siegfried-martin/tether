@@ -100,12 +100,30 @@ def gevent(eid, start, end=None, **kw):
     return ev
 
 
+def test_google_event_details_from_zoom_and_guests():
+    zoom = gevent("z", "2026-11-17T12:00:00Z", "2026-11-17T13:00:00Z", conferenceData={
+        "conferenceSolution": {"name": "Zoom Meeting"},
+        "entryPoints": [{"entryPointType": "video", "uri": "https://zoom.us/j/123", "meetingCode": "123",
+                         "passcode": "abc"},
+                        {"entryPointType": "phone", "uri": "tel:+1555", "label": "+1 555", "pin": "9"}]},
+        attendees=[{"email": "me@x.com", "self": True}, {"email": "b@x.com", "responseStatus": "declined"},
+                   {"email": "o@x.com", "displayName": "Olive", "organizer": True, "responseStatus": "accepted"},
+                   {"email": "room@x", "resource": True}])
+    assert gcal.to_instance(zoom, TZ).description == (
+        "Join Zoom Meeting: https://zoom.us/j/123\nMeeting ID: 123 · Passcode: abc\nPhone: +1 555 (PIN 9)\n"
+        "Guests (2): Olive (organizer), b@x.com (declined)")
+    # A description that already carries the invite isn't repeated; it follows the details.
+    invite = zoom | {"description": "Join at https://zoom.us/j/123", "attendees": []}
+    assert gcal.to_instance(invite, TZ).description == "Join at https://zoom.us/j/123"
+    assert gcal.to_instance(gevent("n", "2026-11-17T12:00:00Z"), TZ).description is None
+
+
 def test_google_event_to_instance():
     plain = gcal.to_instance(gevent("a", "2026-11-17T12:00:00-05:00", "2026-11-17T13:00:00-05:00",
                                     hangoutLink="https://meet.google.com/abc-defg-hij"), TZ)
     assert (plain.start, plain.end, plain.instance_start) == ("2026-11-17T17:00:00Z", "2026-11-17T18:00:00Z",
                                                                "2026-11-17T17:00:00Z")
-    assert plain.description == "Join: https://meet.google.com/abc-defg-hij"
+    assert plain.description == "Join Google Meet: https://meet.google.com/abc-defg-hij"
     assert plain.modified_at == "2026-11-10T08:00:00Z"
     moved = gcal.to_instance(gevent("b_1", "2026-11-18T15:00:00Z", "2026-11-18T16:00:00Z", uid="series@x",
                                     originalStartTime={"dateTime": "2026-11-18T14:00:00Z"}), TZ)

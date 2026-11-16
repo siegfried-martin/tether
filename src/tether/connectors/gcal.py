@@ -122,11 +122,7 @@ def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
         busy = "tentative"
     else:
         busy = "busy"
-    description = event.get("description") or None
-    join = event.get("hangoutLink")
-    if join and (not description or join not in description):
-        # Meet links live outside the description; carry them so the hub copy can be joined.
-        description = f"{description}\n\nJoin: {join}" if description else f"Join: {join}"
+    description = _with_details(event, event.get("description") or None)
     return Instance(
         uid=event.get("iCalUID") or event["id"],
         instance_start=_time(original, tz)[0] if original else start,
@@ -141,6 +137,51 @@ def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
         organizer_self="organizer" not in event or bool(event["organizer"].get("self")),   # Google omits false
         guests=sum(1 for a in event.get("attendees", []) if not a.get("self") and not a.get("resource")),
     )
+
+
+MAX_GUESTS_LISTED = 15
+RESPONSE_NOTE = {"declined": "declined", "tentative": "maybe"}
+
+
+def _with_details(event: dict, description: str | None) -> str | None:
+    """The description, with what Google shows beside it: the video call (Meet or an add-on such
+    as Zoom keeps it outside the description) and the guest list. Put first, as Google does,
+    so they survive the agenda's cut of long descriptions."""
+    lines = []
+    conference = event.get("conferenceData") or {}
+    points = conference.get("entryPoints") or []
+    video = next((p for p in points if p.get("entryPointType") == "video" and p.get("uri")), None)
+    join = video["uri"] if video else event.get("hangoutLink")
+    if join and join not in (description or ""):
+        name = ((conference.get("conferenceSolution") or {}).get("name")
+                or ("Google Meet" if "meet.google.com" in join else "the call"))
+        lines.append(f"Join {name}: {join}")
+        code = video and (video.get("meetingCode") or video.get("accessCode"))
+        secret = video and (video.get("passcode") or video.get("password") or video.get("pin"))
+        if code or secret:
+            lines.append(" · ".join(filter(None, [code and f"Meeting ID: {code}", secret and f"Passcode: {secret}"])))
+        phone = next((p for p in points if p.get("entryPointType") == "phone" and (p.get("label") or p.get("uri"))),
+                     None)
+        if phone:
+            number = phone.get("label") or phone["uri"].removeprefix("tel:")
+            pin = phone.get("pin") or phone.get("accessCode")
+            lines.append(f"Phone: {number}" + (f" (PIN {pin})" if pin else ""))
+    guests = [a for a in event.get("attendees", []) if not a.get("self") and not a.get("resource")]
+    if guests:
+        def who(a: dict) -> str:
+            notes = ["organizer"] if a.get("organizer") else []
+            if a.get("responseStatus") in RESPONSE_NOTE:
+                notes.append(RESPONSE_NOTE[a["responseStatus"]])
+            name = a.get("displayName") or a.get("email") or "?"
+            return f"{name} ({', '.join(notes)})" if notes else name
+        ordered = sorted(guests, key=lambda a: not a.get("organizer"))   # organizer first
+        listed = ", ".join(who(a) for a in ordered[:MAX_GUESTS_LISTED])
+        more = len(ordered) - MAX_GUESTS_LISTED
+        lines.append(f"Guests ({len(guests)}): {listed}" + (f", and {more} more" if more > 0 else ""))
+    if not lines:
+        return description
+    details = "\n".join(lines)
+    return f"{details}\n\n{description}" if description else details
 
 
 def _time(value: dict, tz: ZoneInfo) -> tuple[str, bool]:
