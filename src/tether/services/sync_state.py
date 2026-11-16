@@ -60,18 +60,22 @@ def record_failure(conn: sqlite3.Connection, account_id: int, stream: str, error
 def sync_status(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """SELECT a.label AS account, a.kind, a.status, s.stream, s.last_attempt_at, s.last_ok_at,
-                  s.failures, s.last_error
+                  s.failures, s.last_error, cs.name AS source
            FROM account a LEFT JOIN sync_state s ON s.account_id = a.id
+           LEFT JOIN calendar_source cs ON s.stream = 'calendar:' || cs.id
            ORDER BY a.id, s.stream"""
     ).fetchall()
     return [dict(r) for r in rows]
 
 
 def source_alerts(conn: sqlite3.Connection, now: str | None = None) -> list[dict]:
-    """Urgent rule 1 (so far): auth failures and sources stale past two hours."""
+    """Urgent rule 1: auth failures and sources stale past two hours (held calendar deletes are
+    added by the overview). One alert per account, or per calendar for calendar streams."""
     now_dt = parse_iso(now or utcnow())
     alerts = []
     for row in sync_status(conn):
+        # A calendar stream is named for its calendar, so its alert is separate from the mailbox's.
+        name = f"{row['source']} calendar" if row["source"] and row["kind"] == "gmail" else row["account"]
         if row["status"] == "auth_error":
             alerts.append({"kind": "auth_error", "account": row["account"],
                            "message": f"{row['account']}: sign-in expired or revoked. Reconnect it in Settings."})
@@ -81,13 +85,13 @@ def source_alerts(conn: sqlite3.Connection, now: str | None = None) -> list[dict
         if row["last_ok_at"] is None:
             # Never synced: alert once it has failed repeatedly, not while the first sync runs.
             if row["failures"] >= 3:
-                alerts.append({"kind": "stale", "account": row["account"],
-                               "message": f"{row['account']}: has not synced yet ({row['last_error']})."})
+                alerts.append({"kind": "stale", "account": name,
+                               "message": f"{name}: has not synced yet ({row['last_error']})."})
             continue
         if now_dt - parse_iso(row["last_ok_at"]) > STALE_AFTER:
-            alerts.append({"kind": "stale", "account": row["account"],
-                           "message": f"{row['account']}: no successful sync for over two hours."})
-    # One alert per account is enough.
+            alerts.append({"kind": "stale", "account": name,
+                           "message": f"{name}: no successful sync for over two hours."})
+    # One alert per account (or calendar) is enough.
     seen, unique = set(), []
     for alert in alerts:
         if alert["account"] not in seen:

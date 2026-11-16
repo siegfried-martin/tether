@@ -295,6 +295,18 @@ What one published Exchange Online calendar actually returned. Build and test th
 - There are no ATTENDEE or ORGANIZER lines.
 - It was published with all details. 1,129 events carry a DESCRIPTION, median about 1.5 KB, most with Teams join links.
 
+### As built (phase 5)
+
+- Config: `TETHER_HUB_ACCOUNT` (the hub account's address) and `TETHER_HUB_CALENDAR_ID`. Until both are set, sources still sync and the agenda is served from Tether; nothing is written to Google. Changing the hub calendar rewrites every hub event to the new one.
+- The ICS feed comes from `TETHER_ICS_URL`, labelled `TETHER_ICS_LABEL` (default `Work calendar`), as an account of kind `ics` whose source's `external_ref` is `feed`. The URL is never stored in the database.
+- Calendar lists refresh hourly. A newly seen calendar starts enabled only if it is the account's own primary calendar. Sources are switched on and off in Settings; switching one off removes its events, and the next pass deletes hub copies no other source holds.
+- One poller task fetches due sources one after another (Google every 5 minutes, ICS every 15), then assigns and writes. ICS parsing runs off the event loop. The ICS cursor is the feed's hash plus the window's first day, so an unchanged feed is skipped but still re-expanded daily as the window rolls.
+- Windows time zone names resolve through the feed's VTIMEZONE blocks and icalendar's built-in Windows-to-IANA map; no map is kept in Tether.
+- Busy status is kept per event (`busy`, `tentative`, `free`, `oof`), from `X-MICROSOFT-CDO-BUSYSTATUS` or Google's transparency and your response. A merged event takes the busiest member's status; a free one is written as "show as free". Declined Google invites and working-location markers are skipped. A Meet link is appended to the description so the hub copy can be joined.
+- `hub_event` stores the merged content, with `desired_hash` for the content and `content_hash` for what Google last received; a difference is a pending write. Writes commit one by one, so a failure part-way leaves the rest pending.
+- Change lag for the ICS feed is logged per changed event (now minus its LAST-MODIFIED), with no content, to measure the end-to-end lag.
+- `get_agenda(start?, end?)` takes `start` and `end` rather than `from` and `to`, since `from` cannot be a parameter name. Each event carries its sources, busy status, a Teams, Meet or Zoom `join_url` when one is found, and a capped description. `get_overview` adds today's agenda and the held deletes.
+
 ## MCP tool surface
 
 Seventeen tools, each a one-to-one wrapper over a service function that REST also calls. Nothing sends or replies. The only tool that deletes anything is `release_calendar_hold`, and it deletes only hub events that Tether itself created.

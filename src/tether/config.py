@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # Label of the account that holds work-digest items (created on the first ingest).
     digest_label: str = "Work"
 
+    # Calendar hub: the Google account (its mailbox address) and the calendar ID on it that
+    # the hub writes to. Create that calendar by hand; until both are set, the agenda
+    # still works inside Tether but nothing is written to Google.
+    hub_account: str | None = None
+    hub_calendar_id: str | None = None
+    # A published ICS feed (e.g. a work Outlook calendar). A secret: anyone with it can read the calendar.
+    ics_url: str | None = None
+    ics_label: str = "Work calendar"
+    calendar_google_minutes: int = 5
+    calendar_ics_minutes: int = 15
+
     initial_sync_days: int = 14
     gmail_poll_seconds: int = 60
 

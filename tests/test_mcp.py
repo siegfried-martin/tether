@@ -109,7 +109,8 @@ def test_full_flow_then_tool_call(client, monkeypatch):
     tools = rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
     assert {t["name"] for t in tools} == {
         "sync_status", "list_items", "archive_item", "unarchive_item", "get_overview", "list_tasks",
-        "create_task", "update_task", "complete_task", "search_mail", "get_thread", "ingest_digest"}
+        "create_task", "update_task", "complete_task", "search_mail", "get_thread", "ingest_digest",
+        "get_agenda", "release_calendar_hold"}
     called = rpc(client, tokens["access_token"], "tools/call", {"name": "sync_status", "arguments": {}})
     assert called.status_code == 200 and "error" not in called.json()
 
@@ -237,3 +238,19 @@ def test_ingest_digest_tool(client, conn, monkeypatch):
     assert out["created"] == 1 and out["rejected"] == []
     bad = call("ingest_digest", raw_text="NO ACTION ITEMS", digest_date="soon")
     assert bad["isError"] and "digest_date" in bad["content"][0]["text"]
+
+
+def test_get_agenda_tool(client, conn, monkeypatch):
+    import json
+    _, _, _, tokens = connect(client, monkeypatch)
+    tools = rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
+    schema = next(t for t in tools if t["name"] == "get_agenda")["inputSchema"]
+    assert set(schema["properties"]) == {"start", "end"}
+    result = rpc(client, tokens["access_token"], "tools/call",
+                 {"name": "get_agenda", "arguments": {"start": "2026-11-15", "end": "2026-11-16"}}).json()["result"]
+    assert not result.get("isError"), result
+    assert result["structuredContent"]["result"] == []
+    bad = rpc(client, tokens["access_token"], "tools/call",
+              {"name": "get_agenda", "arguments": {"start": "monday"}}).json()["result"]
+    assert bad["isError"] and "start must be a date" in bad["content"][0]["text"]
+    del json

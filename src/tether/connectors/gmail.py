@@ -10,11 +10,9 @@ Spec v1.1 rules implemented here:
 - An expired history ID triggers a full reconcile.
 """
 
-import asyncio
 import html
 import logging
 import sqlite3
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -22,11 +20,10 @@ from urllib.parse import quote
 
 import httpx
 
-from tether.connectors import google_oauth
-from tether.connectors.google_oauth import AuthError
+from tether.connectors.google_api import GoogleClient, RateLimited  # noqa: F401  (RateLimited re-exported)
 from tether.crypto import Vault
 from tether.db import iso, tx
-from tether.services import accounts, items, sync_state
+from tether.services import items, sync_state
 
 log = logging.getLogger(__name__)
 
@@ -46,28 +43,6 @@ CATEGORY_LABELS = {
 
 class HistoryExpired(Exception):
     """history.list returned 404: the stored history ID is too old."""
-
-
-class RateLimited(Exception):
-    """Gmail kept refusing for quota reasons after retries. Transient: the next poll resumes."""
-
-
-# 403/429 reasons that mean "slow down", not "access revoked".
-QUOTA_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded"})
-
-
-def _error_reasons(resp: httpx.Response) -> set[str]:
-    try:
-        return {e.get("reason", "") for e in resp.json().get("error", {}).get("errors", [])}
-    except ValueError:
-        return set()
-
-
-def _retry_after(resp: httpx.Response) -> float | None:
-    try:
-        return float(resp.headers["Retry-After"])
-    except (KeyError, ValueError):
-        return None
 
 
 # --------------------------------------------------------------------------
@@ -204,78 +179,16 @@ class GmailApi(Protocol):
     async def search_thread_ids(self, query: str, limit: int) -> list[str]: ...
 
 
-class GmailClient:
-    """Thin async REST client with token refresh, pacing and quota backoff.
+class GmailClient(GoogleClient):
+    """Gmail REST client, paced under Gmail's per-user quota.
 
     Gmail's per-user quota is 6,000 query-cost units a minute, and a metadata
-    thread fetch costs roughly 40, so a burst of ~150 fetches exhausts it. The
-    client paces requests and waits out quota refusals instead of failing.
+    thread fetch costs roughly 40, so a burst of ~150 fetches exhausts it.
     """
 
+    API = API
+    SERVICE = "Gmail"
     MIN_INTERVAL = 0.5   # seconds between requests: ~120 a minute, under the per-user quota
-    MAX_RETRIES = 4      # quota refusals waited out per request before giving up for this poll
-
-    def __init__(self, http: httpx.AsyncClient, conn: sqlite3.Connection, vault: Vault,
-                 account_id: int, client_id: str, client_secret: str, *, sleep=asyncio.sleep,
-                 min_interval: float | None = None):
-        self.http, self.conn, self.vault = http, conn, vault
-        if min_interval is not None:
-            self.MIN_INTERVAL = min_interval
-        self.account_id = account_id
-        self.client_id, self.client_secret = client_id, client_secret
-        self.secret = accounts.load_credential(conn, vault, account_id)
-        self._sleep = sleep
-        self._next_request_at = 0.0
-
-    @property
-    def email(self) -> str:
-        return self.secret["email"]
-
-    async def _token(self) -> str:
-        if self.secret.get("expires_at", 0) - 60 < time.time():
-            token = await google_oauth.refresh(
-                self.http, client_id=self.client_id, client_secret=self.client_secret,
-                refresh_token=self.secret["refresh_token"],
-            )
-            self.secret["access_token"] = token["access_token"]
-            self.secret["expires_at"] = int(time.time()) + int(token.get("expires_in", 3600))
-            self.secret["expires_at_iso"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.secret["expires_at"]))
-            accounts.save_credential(self.conn, self.vault, self.account_id, self.secret)
-        return self.secret["access_token"]
-
-    async def _pace(self) -> None:
-        wait = self._next_request_at - time.monotonic()
-        if wait > 0:
-            await self._sleep(wait)
-        self._next_request_at = time.monotonic() + self.MIN_INTERVAL
-
-    async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
-        return await self._request("GET", path, params=params)
-
-    async def _request(self, method: str, path: str, *, params: dict | None = None,
-                       json: dict | None = None) -> httpx.Response:
-        refreshed, quota_waits = False, 0
-        while True:
-            await self._pace()
-            resp = await self.http.request(method, f"{API}{path}", params=params, json=json,
-                                           headers={"Authorization": f"Bearer {await self._token()}"})
-            if resp.status_code == 401:
-                if refreshed:
-                    raise AuthError("Gmail rejected a freshly refreshed token (401)")
-                refreshed, self.secret["expires_at"] = True, 0  # force a refresh, then retry once
-                continue
-            reasons = _error_reasons(resp) if resp.status_code == 403 else set()
-            if resp.status_code == 429 or reasons & QUOTA_REASONS:
-                quota_waits += 1
-                if quota_waits > self.MAX_RETRIES:
-                    raise RateLimited(f"Gmail quota still exhausted after {self.MAX_RETRIES} waits")
-                delay = _retry_after(resp) or min(60.0, 20.0 * quota_waits)
-                log.info("account %s: Gmail quota hit, waiting %.0fs", self.account_id, delay)
-                await self._sleep(delay)
-                continue
-            if resp.status_code == 403:
-                raise AuthError(f"Gmail refused access: {', '.join(sorted(reasons)) or 'forbidden'}")
-            return resp
 
     async def get_profile(self) -> dict:
         resp = await self._get("/profile")

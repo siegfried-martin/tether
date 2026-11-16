@@ -44,6 +44,40 @@ export type Overview = {
   urgent: { alerts: Alert[]; tasks: Task[]; follow_ups: unknown[]; items: Item[] }
   inbox: { count: number; by_account: Record<string, number>; preview: Item[] }
   tasks: { count: number }
+  calendar: { today: AgendaEvent[]; holds: Hold[] }
+}
+
+export type AgendaEvent = {
+  id: number
+  title: string
+  start: string
+  end: string
+  all_day: boolean
+  location: string | null
+  busy: 'busy' | 'tentative' | 'free' | 'oof'
+  join_url: string | null
+  description?: string | null
+  sources: { source_id: number; name: string; color: string }[]
+}
+
+export type Hold = { source_id: number; source: string; events: { title: string; start: string; all_day: boolean }[] }
+
+export type CalendarSource = {
+  id: number
+  kind: 'google' | 'ics'
+  name: string
+  enabled: boolean
+  account_id: number
+  account: string
+  account_color: string
+  events: number
+  held: number
+}
+
+export type CalendarStatus = {
+  hub: { configured: boolean; account: string | null; upserts: number; deletes: number }
+  sources: CalendarSource[]
+  holds: Hold[]
 }
 
 export type SyncSettings = {
@@ -64,6 +98,7 @@ export type SyncRow = {
   last_ok_at: string | null
   failures: number | null
   last_error: string | null
+  source: string | null
 }
 
 export class Unauthorized extends Error {}

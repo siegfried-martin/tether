@@ -20,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tether.config import Settings
 from tether.mcp_server.provider import ConsentRequests, TetherOAuthProvider
-from tether.services import digest, items, mail, overview, sync_state, tasks, triage
+from tether.services import calendar, digest, items, mail, overview, sync_state, tasks, triage
 from tether.services.triage import GmailFactory
 
 MCP_PATH = "/mcp"
@@ -39,11 +39,11 @@ class ThreadRef(BaseModel):
     thread_id: str
 
 
-USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError)
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError)
 
 
-def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
-          gmail: GmailFactory) -> tuple[MCPServer, TetherOAuthProvider, ASGIApp]:
+def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection], gmail: GmailFactory,
+          on_calendar_change: Callable[[], None] | None = None) -> tuple[MCPServer, TetherOAuthProvider, ASGIApp]:
     base = settings.base_url.rstrip("/")
     resource = base + MCP_PATH
     provider = TetherOAuthProvider(
@@ -106,10 +106,11 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
 
     @server.tool(description=(
         "The home screen as data: urgent things (source alerts, tasks due today or overdue, high-priority "
-        "items), inbox counts per account, and open task count. Start here for 'what am I forgetting?'. "
+        "items, held calendar deletes), inbox counts per account, open task count and today's calendar. "
+        "Start here for 'what am I forgetting?'. "
         f"Dates are local to {settings.timezone}."))
     async def get_overview() -> dict:
-        return overview.get_overview(get_conn(), settings.today())
+        return overview.get_overview(get_conn(), settings.today(), settings.tz)
 
     @server.tool(description=(
         "List tasks. status 'open' (default) returns each top-level task followed by its subtasks; 'done' "
@@ -169,6 +170,28 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
     async def ingest_digest(raw_text: str, digest_date: str | None = None) -> dict:
         return _sync_guard(digest.ingest_digest, get_conn(), raw_text, tz=settings.tz, today=settings.today(),
                            digest_date=digest_date, label=settings.digest_label)
+
+    @server.tool(description=(
+        "The owner's merged calendar (every connected Google calendar they selected, plus the work "
+        "calendar feed) for a range of days. start and end are dates (YYYY-MM-DD), inclusive; start "
+        "defaults to today and end to two weeks on. Timed events are in UTC (Z); all-day events carry dates, with an "
+        f"exclusive end. The owner's zone is {settings.timezone}. Each event lists its source calendars, "
+        "busy (busy, tentative, free or oof; tentative usually means an unanswered invite), a join_url "
+        "for Teams, Meet or Zoom when there is one, and its description, capped."))
+    async def get_agenda(start: str | None = None, end: str | None = None) -> list[dict]:
+        first, last = _sync_guard(calendar.parse_range, start, end, settings.today())
+        return _sync_guard(calendar.get_agenda, get_conn(), first, last, settings.tz)
+
+    @server.tool(description=(
+        "Release a held calendar delete. When many events vanish from one source at once, Tether holds "
+        "their removal and get_overview lists them under calendar.holds; show the owner those events "
+        "first. action 'apply' removes them from the hub calendar; 'discard' leaves the hub copies in "
+        "Google as they are and stops managing them."))
+    async def release_calendar_hold(source_id: int, action: Literal["apply", "discard"]) -> dict:
+        result = _sync_guard(calendar.release_hold, get_conn(), source_id, action)
+        if on_calendar_change:
+            on_calendar_change()
+        return result
 
     host = urlparse(base).netloc
     app = server.streamable_http_app(

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { get, patch, post, type Account, type Item, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
 import { errorText, relativeTime, ToastView, usePolling, useToast } from './shared'
+import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
 import { DueLabel, TasksPage } from './Tasks'
 
 function useRoute(): [string, (path: string) => void] {
@@ -35,14 +36,15 @@ export default function App() {
       <header className="bar">
         <a href="/" className="brand" onClick={(e) => { e.preventDefault(); navigate('/') }}>Tether</a>
         <nav>
-          {([['/', 'Inbox'], ['/tasks', 'Tasks'], ['/settings', 'Settings']] as const).map(([to, label]) => (
+          {([['/', 'Inbox'], ['/tasks', 'Tasks'], ['/calendar', 'Calendar'], ['/settings', 'Settings']] as const).map(([to, label]) => (
             <a key={to} href={to} className={path === to ? 'active' : ''}
                onClick={(e) => { e.preventDefault(); navigate(to) }}>{label}</a>
           ))}
         </nav>
       </header>
       {path === '/settings' ? <Settings onSignedOut={() => setMe(null)} />
-        : path === '/tasks' ? <TasksPage /> : <Home />}
+        : path === '/tasks' ? <TasksPage />
+        : path === '/calendar' ? <CalendarPage /> : <Home onCalendar={() => navigate('/calendar')} />}
     </div>
   )
 }
@@ -58,7 +60,7 @@ function Login() {
 
 type Tab = 'open' | 'archived'
 
-function Home() {
+function Home({ onCalendar }: { onCalendar: () => void }) {
   const overview = usePolling<Overview>('/api/overview')
   const accountList = usePolling<Account[]>('/api/accounts')
   const [tab, setTab] = useState<Tab>('open')
@@ -128,6 +130,7 @@ function Home() {
   return (
     <main>
       {overview.data && <Urgent urgent={overview.data.urgent} onComplete={completeTask} />}
+      {overview.data?.calendar && <TodayCard events={overview.data.calendar.today} onOpen={onCalendar} />}
       <section>
         <div className="inbox-head">
           <div className="tabs" role="tablist">
@@ -264,6 +267,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
         {accounts.data?.length === 0 && <p className="muted">No accounts yet.</p>}
         <a className="button" href="/accounts/google/connect">Connect a Google account</a>
       </section>
+      <CalendarSettings />
       <DigestPanel onIngested={accounts.reload} />
       <section>
         <h2>Sync</h2>
@@ -273,7 +277,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
             {sync.data?.filter((r) => r.stream).map((r) => (
               <tr key={`${r.account}-${r.stream}`}>
                 <td>{r.account}</td>
-                <td>{r.stream}</td>
+                <td>{r.source ? `calendar: ${r.source}` : r.stream}</td>
                 <td>{relativeTime(r.last_ok_at)}</td>
                 <td title={r.last_error ?? ''}>{r.failures}</td>
               </tr>
@@ -355,7 +359,8 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
         <ColorPicker account={account} onSaved={onSaved} />
         <span className="grow">{account.label}</span>
         <span className={`status ${account.status}`}>
-          {account.kind === 'digest' ? 'digest' : account.status === 'ok' ? 'connected' : account.status.replace('_', ' ')}
+          {account.kind === 'digest' ? 'digest' : account.kind === 'ics' ? 'calendar feed'
+            : account.status === 'ok' ? 'connected' : account.status.replace('_', ' ')}
         </span>
         {account.sync && (
           <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>

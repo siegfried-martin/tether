@@ -30,8 +30,8 @@ from tether.connectors.google_oauth import AuthError
 from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
-from tether.pollers import GmailPoller
-from tether.services import accounts, digest, items, mail, overview, sync_state, tasks, triage
+from tether.pollers import CalendarPoller, GmailPoller
+from tether.services import accounts, calendar, digest, items, mail, overview, sync_state, tasks, triage
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +59,14 @@ class DigestIn(BaseModel):
     digest_date: str | None = None
 
 
+class SourceUpdate(BaseModel):
+    enabled: bool
+
+
+class HoldRelease(BaseModel):
+    action: str
+
+
 class TaskUpdate(BaseModel):
     """Only the fields sent are changed; an explicit null clears one."""
     title: str | None = None
@@ -69,7 +77,7 @@ class TaskUpdate(BaseModel):
     parent_id: int | None = None
 
 
-USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError)
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError)
 
 
 @contextlib.contextmanager
@@ -81,6 +89,13 @@ def user_errors():
         raise HTTPException(exc.status, str(exc)) from exc
 
 
+def _calendar_changed(app: FastAPI) -> None:
+    poller = getattr(app.state, "calendar", None)
+    if poller:
+        poller.mark_dirty()
+        poller.wake()
+
+
 def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, start_pollers: bool = True) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -90,7 +105,9 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         app.state.gmail = GmailPoller(app.state.conn, app.state.vault, app.state.http, settings)
         app.state.gmail_clients = GmailClients(app.state.http, app.state.conn, app.state.vault,
                                                settings.google_client_id, settings.google_client_secret)
-        tasks = [asyncio.create_task(app.state.gmail.run_forever())] if start_pollers else []
+        app.state.calendar = CalendarPoller(app.state.conn, app.state.vault, app.state.http, settings)
+        tasks = [asyncio.create_task(app.state.gmail.run_forever()),
+                 asyncio.create_task(app.state.calendar.run_forever())] if start_pollers else []
         try:
             async with mcp_server.session_manager.run():
                 yield
@@ -104,7 +121,8 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
                        same_site="lax", max_age=60 * 60 * 24 * 30)
     # MCP endpoint and its OAuth server (metadata, /register, /authorize, /token, /revoke).
     mcp_server, mcp_provider, mcp_app = mcp.build(
-        settings, lambda: app.state.conn, lambda account_id: app.state.gmail_clients(account_id))
+        settings, lambda: app.state.conn, lambda account_id: app.state.gmail_clients(account_id),
+        on_calendar_change=lambda: _calendar_changed(app))
     app.add_middleware(mcp.MCPRouter, mcp_app=mcp_app)
 
     # Dependencies are async so FastAPI runs them on the loop thread, not a threadpool.
@@ -291,7 +309,7 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
 
     @app.get("/api/overview")
     async def get_overview(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
-        return overview.get_overview(conn, settings.today())
+        return overview.get_overview(conn, settings.today(), settings.tz)
 
     # --------------------------------------------------------------- tasks
 
@@ -338,6 +356,45 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         with user_errors():
             return await mail.search_mail(request.app.state.conn, request.app.state.gmail_clients, q,
                                           account=account, limit=limit)
+
+    # ------------------------------------------------------------ calendar
+
+    def hub(conn: sqlite3.Connection) -> calendar.Hub | None:
+        return calendar.hub_config(conn, settings.hub_account, settings.hub_calendar_id)
+
+    @app.get("/api/agenda")
+    async def get_agenda(start: str | None = None, end: str | None = None, _: str = Depends(require_user),
+                         conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            first, last = calendar.parse_range(start, end, settings.today())
+            return calendar.get_agenda(conn, first, last, settings.tz)
+
+    @app.get("/api/calendar")
+    async def get_calendar(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        return calendar.calendar_status(conn, hub(conn), settings.hub_account)
+
+    @app.patch("/api/calendar/sources/{source_id}")
+    async def update_source(source_id: int, body: SourceUpdate, request: Request, _: str = Depends(require_user),
+                            conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            result = calendar.set_source_enabled(conn, source_id, body.enabled, hub(conn))
+        request.app.state.calendar.mark_dirty()
+        request.app.state.calendar.wake()
+        return result
+
+    @app.post("/api/calendar/sources/{source_id}/release")
+    async def release_hold(source_id: int, body: HoldRelease, request: Request, _: str = Depends(require_user),
+                           conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            result = calendar.release_hold(conn, source_id, body.action)
+        request.app.state.calendar.mark_dirty()
+        request.app.state.calendar.wake()
+        return result
+
+    @app.post("/api/calendar/sync")
+    async def calendar_sync(request: Request, _: str = Depends(require_user)):
+        request.app.state.calendar.wake(refetch=True)
+        return {"ok": True}
 
     @app.post("/api/digest")
     async def ingest_digest(body: DigestIn, _: str = Depends(require_user),
