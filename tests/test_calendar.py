@@ -4,6 +4,7 @@ hub assignment, idempotent hub writes, the agenda, and the poller end to end."""
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from test_web import client, login, settings  # noqa: F401  (fixtures)
@@ -465,3 +466,107 @@ def test_calendar_api(client, conn, monkeypatch):
     assert client.get("/api/agenda?start=2026-11-15&end=2026-11-16").json() == []
     assert client.get("/api/agenda?start=soon").status_code == 422
     assert client.post(f"/api/calendar/sources/{source['id']}/release", json={"action": "apply"}).status_code == 409
+
+
+# --------------------------------------------------------------------------- new events
+
+
+def new(**kw):
+    base = dict(source_id=1, start="2026-11-16T09:30", end="2026-11-16T10:00", time_zone="America/Chicago")
+    return calendar.NewEvent(**{**base, **kw})
+
+
+def test_new_event_body_timed():
+    body = calendar.new_event_body(new(title="  Lunch ", guests=["A@x.com", "a@x.com", " "], meet=True,
+                                       repeat="weekly", location="Cafe"))
+    assert body["summary"] == "Lunch" and body["location"] == "Cafe"
+    assert body["start"] == {"dateTime": "2026-11-16T09:30:00", "timeZone": "America/Chicago"}
+    assert body["end"]["dateTime"] == "2026-11-16T10:00:00"
+    assert body["attendees"] == [{"email": "a@x.com"}]
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY"] and body["transparency"] == "opaque"
+    assert body["conferenceData"]["createRequest"]["conferenceSolutionKey"] == {"type": "hangoutsMeet"}
+    assert "description" not in body
+
+
+def test_new_event_body_all_day_end_is_exclusive():
+    body = calendar.new_event_body(new(all_day=True, start="2026-11-16", end="2026-11-17", busy="free"))
+    assert body["start"]["date"] == "2026-11-16" and body["end"]["date"] == "2026-11-18"
+    assert body["transparency"] == "transparent"
+
+
+@pytest.mark.parametrize("bad", [
+    dict(end="2026-11-16T09:00"), dict(time_zone="Mars/Base"), dict(guests=["nope"]), dict(busy="maybe"),
+    dict(repeat="hourly"), dict(start="2026-11-16T09:30-06:00"), dict(start="soon"),
+    dict(all_day=True, start="2026-11-17", end="2026-11-16"),
+])
+def test_new_event_body_rejects(bad):
+    with pytest.raises(calendar.CalendarError):
+        calendar.new_event_body(new(**bad))
+
+
+class CreatingCalendar(FakeCalendar):
+    def __init__(self, status=200):
+        super().__init__()
+        self.status, self.created = status, []
+
+    async def create_event(self, calendar_id, body, *, conference, send_updates):
+        if self.status != 200:
+            request = httpx.Request("POST", "https://x")
+            raise httpx.HTTPStatusError("no", request=request, response=httpx.Response(self.status, request=request))
+        self.created.append((calendar_id, body, conference, send_updates))
+        return {"id": "abc", "htmlLink": "https://calendar.google.com/x"}
+
+
+async def test_create_event_only_on_writable_calendars(conn, sources):
+    api = CreatingCalendar()
+    status = {s["id"]: s for s in calendar.calendar_status(conn, sources["hub_config"], "me@x.com")["sources"]}
+    assert status[sources["me"]]["writable"] and status[sources["family"]]["writable"]
+    assert not status[sources["hub"]]["writable"] and not status[sources["work"]]["writable"]
+
+    result = await calendar.create_event(conn, api, new(source_id=sources["me"], guests=["b@x.com"]),
+                                         sources["hub_config"])
+    assert result["id"] == "abc" and result["shown"] is True
+    assert api.created[0][0] == "me@x.com" and api.created[0][3] == "all"
+    await calendar.create_event(conn, api, new(source_id=sources["family"], guests=["b@x.com"], notify=False),
+                                sources["hub_config"])
+    assert api.created[1][3] == "none"
+
+    for source in (sources["hub"], sources["work"]):
+        with pytest.raises(calendar.CalendarError):
+            await calendar.create_event(conn, api, new(source_id=source), sources["hub_config"])
+    with pytest.raises(calendar.CalendarError) as err:
+        await calendar.create_event(conn, CreatingCalendar(403), new(source_id=sources["me"]), sources["hub_config"])
+    assert err.value.status == 403
+
+
+async def test_read_only_calendars_are_not_writable(conn, sources):
+    calendar.sync_calendar_list(conn, sources["account"], [
+        {"id": "holidays@group", "summary": "Holidays", "accessRole": "reader"}], sources["hub_config"])
+    by_name = {s["name"]: s for s in calendar.calendar_status(conn, sources["hub_config"], None)["sources"]}
+    assert by_name["Holidays"]["writable"] is False and by_name["me@x.com"]["is_primary"] is True
+
+
+def test_create_event_api(client, conn, monkeypatch):
+    login(client, monkeypatch)
+    acct = conn.execute("INSERT INTO account (kind, label, color, status) VALUES ('gmail', 'me@x.com', '#111111', 'ok')"
+                        ).lastrowid
+    calendar.sync_calendar_list(conn, acct, [{"id": "me@x.com", "summary": "Me", "primary": True,
+                                              "accessRole": "owner"}], None)
+    [source] = client.get("/api/calendar").json()["sources"]
+    assert source["writable"]
+    api = CreatingCalendar()
+    poller = client.app.state.calendar
+    monkeypatch.setattr(poller, "client", lambda account_id: api)
+    refreshed = []
+
+    async def refresh(source_id):
+        refreshed.append(source_id)
+    monkeypatch.setattr(poller, "refresh_source", refresh)
+    resp = client.post("/api/calendar/events", json={"source_id": source["id"], "title": "Call",
+                                                     "start": "2026-11-16T09:30", "end": "2026-11-16T10:00",
+                                                     "time_zone": "America/Chicago"})
+    assert resp.status_code == 201 and resp.json()["id"] == "abc"
+    assert refreshed == [source["id"]] and api.created[0][1]["summary"] == "Call"
+    bad = client.post("/api/calendar/events", json={"source_id": source["id"], "start": "2026-11-16T09:30",
+                                                    "end": "2026-11-16T09:00", "time_zone": "America/Chicago"})
+    assert bad.status_code == 422 and "ends before" in bad.json()["detail"]

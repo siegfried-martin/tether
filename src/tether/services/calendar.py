@@ -20,9 +20,10 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 import sqlite3
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -79,15 +80,15 @@ HUB_STREAM = "calendar.hub"
 
 def list_sources(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        """SELECT s.id, s.kind, s.external_ref, s.name, s.enabled, a.id AS account_id, a.label AS account,
-                  a.color AS account_color,
+        """SELECT s.id, s.kind, s.external_ref, s.name, s.enabled, s.access_role, s.is_primary,
+                  a.id AS account_id, a.label AS account, a.color AS account_color, a.status AS account_status,
                   (SELECT COUNT(*) FROM source_event e WHERE e.source_id = s.id) AS events,
                   (SELECT COUNT(*) FROM source_event e WHERE e.source_id = s.id AND e.missing_since IS NOT NULL)
                     AS held
            FROM calendar_source s JOIN account a ON a.id = s.account_id
            ORDER BY a.id, s.enabled DESC, s.name"""
     ).fetchall()
-    return [{**dict(r), "enabled": bool(r["enabled"])} for r in rows]
+    return [{**dict(r), "enabled": bool(r["enabled"]), "is_primary": bool(r["is_primary"])} for r in rows]
 
 
 def get_source(conn: sqlite3.Connection, source_id: int) -> sqlite3.Row:
@@ -108,13 +109,15 @@ def sync_calendar_list(conn: sqlite3.Connection, account_id: int, calendars: lis
             existing = conn.execute("SELECT id, name, enabled FROM calendar_source WHERE account_id = ? "
                                     "AND external_ref = ?", (account_id, cal["id"])).fetchone()
             name = cal.get("summaryOverride") or cal.get("summary") or cal["id"]
+            role, primary = cal.get("accessRole"), int(bool(cal.get("primary")))
             if existing is None:
-                enabled = bool(cal.get("primary")) and cal.get("accessRole") == "owner" and not is_hub
-                conn.execute("INSERT INTO calendar_source (account_id, kind, external_ref, name, enabled) "
-                             "VALUES (?, 'google', ?, ?, ?)", (account_id, cal["id"], name, int(enabled)))
+                enabled = bool(primary) and role == "owner" and not is_hub
+                conn.execute("INSERT INTO calendar_source (account_id, kind, external_ref, name, enabled, access_role, "
+                             "is_primary) VALUES (?, 'google', ?, ?, ?, ?, ?)",
+                             (account_id, cal["id"], name, int(enabled), role, primary))
             else:
-                conn.execute("UPDATE calendar_source SET name = ?, enabled = enabled AND ? WHERE id = ?",
-                             (name, int(not is_hub), existing["id"]))
+                conn.execute("UPDATE calendar_source SET name = ?, enabled = enabled AND ?, access_role = ?, "
+                             "is_primary = ? WHERE id = ?", (name, int(not is_hub), role, primary, existing["id"]))
 
 
 def ensure_ics_source(conn: sqlite3.Connection, label: str) -> int:
@@ -544,9 +547,134 @@ def _local_day(event: dict, tz: ZoneInfo) -> str:
 
 
 def calendar_status(conn: sqlite3.Connection, hub: Hub | None, hub_label: str | None) -> dict:
+    sources = [{**s, "writable": _writable(s, hub)} for s in list_sources(conn)]
     return {"hub": {"configured": hub is not None, "account": hub_label if hub else None,
                     **pending_writes(conn)},
-            "sources": list_sources(conn), "holds": holds(conn)}
+            "sources": sources, "holds": holds(conn)}
+
+
+# --------------------------------------------------------------------------
+# New events
+# --------------------------------------------------------------------------
+
+REPEATS = {
+    "daily": "RRULE:FREQ=DAILY",
+    "weekdays": "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+    "weekly": "RRULE:FREQ=WEEKLY",      # on the start's weekday
+    "monthly": "RRULE:FREQ=MONTHLY",    # on the start's day of the month
+    "yearly": "RRULE:FREQ=YEARLY",
+}
+EMAIL = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
+MAX_GUESTS = 100
+
+
+@dataclass
+class NewEvent:
+    """An event the owner creates on one of their own calendars. start and end are local wall-clock
+    times ("2026-11-16T09:30") in time_zone, or dates for an all-day event, end inclusive."""
+    source_id: int
+    start: str
+    end: str
+    time_zone: str
+    title: str = ""
+    all_day: bool = False
+    location: str | None = None
+    description: str | None = None
+    guests: list[str] = field(default_factory=list)
+    meet: bool = False
+    busy: str = "busy"
+    repeat: str | None = None
+    notify: bool = True
+
+
+def _writable(source: dict, hub: Hub | None) -> bool:
+    is_hub = hub is not None and source["account_id"] == hub.account_id and source["external_ref"] == hub.calendar_id
+    return (source["kind"] == "google" and source["access_role"] in ("owner", "writer")
+            and source["account_status"] == "ok" and not is_hub)
+
+
+def new_event_body(ev: NewEvent) -> dict:
+    """The Google event for a NewEvent, after checking it. Raises CalendarError with a message for the form."""
+    title = ev.title.strip()
+    if len(title) > 1024:
+        raise CalendarError("The title is too long.")
+    try:
+        ZoneInfo(ev.time_zone)
+    except (ValueError, KeyError):
+        raise CalendarError("Unknown time zone.") from None
+    if ev.all_day:
+        try:
+            first, last = date.fromisoformat(ev.start[:10]), date.fromisoformat(ev.end[:10])
+        except ValueError:
+            raise CalendarError("Dates must look like 2026-11-16.") from None
+        if last < first:
+            raise CalendarError("The event ends before it starts.")
+        # Google's end date is exclusive. The zone is where a repeat is expanded.
+        start = {"date": first.isoformat(), "timeZone": ev.time_zone}
+        end = {"date": (last + timedelta(days=1)).isoformat(), "timeZone": ev.time_zone}
+    else:
+        try:
+            a, b = datetime.fromisoformat(ev.start), datetime.fromisoformat(ev.end)
+        except ValueError:
+            raise CalendarError("Times must look like 2026-11-16T09:30.") from None
+        if a.tzinfo or b.tzinfo:
+            raise CalendarError("Send wall-clock times with a time zone, not offsets.")
+        if b <= a:
+            raise CalendarError("The event ends before it starts.")
+        if b - a > timedelta(days=31):
+            raise CalendarError("An event can last at most 31 days.")
+        start = {"dateTime": a.isoformat(timespec="minutes") + ":00", "timeZone": ev.time_zone}
+        end = {"dateTime": b.isoformat(timespec="minutes") + ":00", "timeZone": ev.time_zone}
+    if ev.busy not in ("busy", "free"):
+        raise CalendarError("Show as must be busy or free.")
+    if ev.repeat and ev.repeat not in REPEATS:
+        raise CalendarError("Unknown repeat.")
+    guests = list(dict.fromkeys(g.strip().lower() for g in ev.guests if g.strip()))
+    if len(guests) > MAX_GUESTS:
+        raise CalendarError(f"At most {MAX_GUESTS} guests.")
+    bad = [g for g in guests if not EMAIL.match(g)]
+    if bad:
+        raise CalendarError(f"Not an email address: {bad[0]}")
+    location, description = (ev.location or "").strip(), (ev.description or "").strip()
+    if len(location) > 1024 or len(description) > 8000:
+        raise CalendarError("The location or description is too long.")
+    body: dict = {"summary": title, "start": start, "end": end,
+                  "transparency": "transparent" if ev.busy == "free" else "opaque",
+                  "reminders": {"useDefault": True}}
+    if location:
+        body["location"] = location
+    if description:
+        body["description"] = description
+    if guests:
+        body["attendees"] = [{"email": g} for g in guests]
+    if ev.repeat:
+        body["recurrence"] = [REPEATS[ev.repeat]]
+    if ev.meet:
+        body["conferenceData"] = {"createRequest": {"requestId": secrets.token_hex(12),
+                                                    "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
+    return body
+
+
+async def create_event(conn: sqlite3.Connection, api: gcal.CalendarApi, ev: NewEvent, hub: Hub | None) -> dict:
+    """Create an event on one of the owner's Google calendars."""
+    source = next((s for s in list_sources(conn) if s["id"] == ev.source_id), None)
+    if source is None:
+        raise CalendarError(f"no calendar source {ev.source_id}", status=404)
+    if not _writable(source, hub):
+        raise CalendarError("Tether can't add events to that calendar.")
+    body = new_event_body(ev)
+    try:
+        created = await api.create_event(source["external_ref"], body, conference=ev.meet,
+                                         send_updates="all" if body.get("attendees") and ev.notify else "none")
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        log.warning("calendar source %s: event create failed: HTTP %s", source["id"], code)
+        if code == 403:
+            raise CalendarError("Google refused. Reconnect this account in Settings so Tether may add events, "
+                                "then try again.", status=403) from None
+        raise CalendarError(f"Google couldn't create the event (HTTP {code}).", status=502) from None
+    return {"id": created.get("id"), "link": created.get("htmlLink"), "meet": created.get("hangoutLink"),
+            "source_id": source["id"], "shown": bool(source["enabled"])}
 
 
 def describe_error(exc: Exception) -> str:

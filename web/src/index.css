@@ -565,3 +565,76 @@ main.calendar-page:not(.view-schedule) .cal-swipe { flex: 1; min-height: 0; disp
   .pc-label { font-size: 1rem; }
   .pc-current { gap: 3px; }
 }
+
+/* New event: the draft on the grid, and the editor */
+.cal-body, .cal-banners { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.slot.draft, .banner.draft {
+  z-index: 3; outline: 2px solid var(--acct); outline-offset: -1px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+.ne-backdrop {
+  position: fixed; inset: 0; z-index: 10; background: rgb(0 0 0 / 0.18); display: grid; place-items: center; padding: 16px;
+}
+.ne {
+  width: min(620px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--bg); color: var(--text);
+  border-radius: 12px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.3); padding: 0 18px 18px; display: grid; gap: 2px;
+  align-content: start;
+}
+.ne-top {
+  display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 1; background: var(--bg);
+  padding: 12px 0 8px;
+}
+.ne-heading { flex: 1; font-weight: 600; color: var(--muted); }
+.ne-title {
+  font: inherit; font-size: 1.35rem; color: var(--text); background: transparent; border: 0;
+  border-bottom: 2px solid var(--border); padding: 6px 2px; margin: 0 0 10px 36px; min-width: 0;
+}
+.ne-title:focus { outline: none; border-bottom-color: var(--accent); }
+.ne-row { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 12px; align-items: start; padding: 4px 0; }
+.ne-icon { color: var(--muted); margin-top: 10px; }
+.ne-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.ne-stack { display: grid; gap: 8px; min-width: 0; }
+.ne-when { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ne-repeat { flex: 0 1 auto; }
+.ne input:not([type="checkbox"]), .ne select, .ne textarea {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid transparent; border-radius: 6px;
+  padding: 8px 10px; min-height: 40px; min-width: 0; max-width: 100%;
+}
+.ne input.ne-title { background: transparent; border-width: 0 0 2px; border-color: var(--border); border-radius: 0; }
+.ne input.ne-title:focus { border-color: var(--accent); }
+.ne input:not(.ne-title):focus, .ne select:focus, .ne textarea:focus { outline: none; border-color: var(--accent); }
+.ne textarea { resize: vertical; font-size: 0.95rem; }
+.ne-wide { width: 100%; }
+.ne-calendar { flex: 1 1 220px; }
+.ne-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0; }
+.ne-check input { width: 18px; height: 18px; margin: 0; }
+.ne-meet-on { font-size: 0.92rem; }
+.ne-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.ne-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ne-chips li {
+  display: inline-flex; align-items: center; gap: 2px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 2px 2px 2px 12px; font-size: 0.9rem; max-width: 100%;
+}
+.ne-chips span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ne-chips button {
+  border: 0; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; width: 28px; height: 28px;
+  border-radius: 50%; cursor: pointer;
+}
+.ne-error { margin: 8px 0 0 36px; }
+@media (max-width: 699px), (max-height: 500px) {
+  /* Phones: the editor takes the whole screen, like Google Calendar's. */
+  .ne-backdrop { padding: 0; place-items: stretch; background: var(--bg); }
+  .ne {
+    width: 100%; max-height: none; height: 100dvh; border-radius: 0; box-shadow: none;
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  .ne-top { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .ne-title { margin-left: 0; }
+  .ne-error { margin-left: 0; }
+  /* The date on its own line, then start – end; all day: first – last date. */
+  .ne-when { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.5fr); }
+  .ne-when > input[type="date"]:first-child { grid-column: 1 / -1; }
+  .ne-when.all-day { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .ne-when.all-day > input[type="date"]:first-child { grid-column: auto; }
+  .ne-repeat { flex: 1 1 180px; }
+  .ne-calendar { flex-basis: 160px; }
+}

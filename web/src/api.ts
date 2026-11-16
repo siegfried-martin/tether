@@ -89,6 +89,8 @@ export type CalendarSource = {
   account_color: string
   events: number
   held: number
+  writable: boolean     // takes new events from Tether
+  is_primary: boolean   // the account's own main calendar
 }
 
 export type CalendarStatus = {

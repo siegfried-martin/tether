@@ -107,6 +107,7 @@ class CalendarPoller:
         self._force = False
         self._lists_at = 0.0
         self._dirty = True
+        self._lock = asyncio.Lock()    # a cycle and a one-source refresh never overlap
 
     def mark_dirty(self) -> None:
         """Source events changed outside a fetch (a source turned off, a hold released)."""
@@ -136,7 +137,24 @@ class CalendarPoller:
         return gcal.CalendarClient(self.http, self.conn, self.vault, account_id,
                                    self.settings.google_client_id, self.settings.google_client_secret)
 
+    async def refresh_source(self, source_id: int) -> None:
+        """Fetch one source now (after Tether added an event to it) so the agenda shows the change
+        at once. The hub write follows in the next cycle."""
+        async with self._lock:
+            source = next((s for s in calendar.list_sources(self.conn) if s["id"] == source_id), None)
+            if not source or not source["enabled"]:
+                return
+            now = datetime.now(UTC)
+            window = Window.around(now.astimezone(self.settings.tz).date(), self.settings.tz)
+            if await self.poll_source(source, window, now):
+                calendar.assign_hub(self.conn)
+        self.wake()
+
     async def cycle(self, now: datetime | None = None) -> None:
+        async with self._lock:
+            await self._cycle(now)
+
+    async def _cycle(self, now: datetime | None = None) -> None:
         force, self._force = self._force, False
         now = now or datetime.now(UTC)
         hub = self.hub()

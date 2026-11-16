@@ -67,6 +67,22 @@ class HoldRelease(BaseModel):
     action: str
 
 
+class EventCreate(BaseModel):
+    source_id: int
+    start: str
+    end: str
+    time_zone: str
+    title: str = ""
+    all_day: bool = False
+    location: str | None = None
+    description: str | None = None
+    guests: list[str] = []
+    meet: bool = False
+    busy: str = "busy"
+    repeat: str | None = None
+    notify: bool = True
+
+
 class TaskUpdate(BaseModel):
     """Only the fields sent are changed; an explicit null clears one."""
     title: str | None = None
@@ -400,6 +416,21 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             result = calendar.release_hold(conn, source_id, body.action)
         request.app.state.calendar.mark_dirty()
         request.app.state.calendar.wake()
+        return result
+
+    @app.post("/api/calendar/events", status_code=201)
+    async def create_event(body: EventCreate, request: Request, _: str = Depends(require_user),
+                           conn: sqlite3.Connection = Depends(conn_dep)):
+        poller = request.app.state.calendar
+        with user_errors():
+            source = calendar.get_source(conn, body.source_id)
+            result = await calendar.create_event(conn, poller.client(source["account_id"]),
+                                                 calendar.NewEvent(**body.model_dump()), hub(conn))
+        # Fetch that calendar now so the new event is on the agenda when this returns.
+        try:
+            await asyncio.wait_for(poller.refresh_source(body.source_id), timeout=15)
+        except Exception as exc:  # the event exists; the next cycle picks it up
+            log.info("calendar source %s: refresh after create failed: %s", body.source_id, type(exc).__name__)
         return result
 
     @app.post("/api/calendar/sync")

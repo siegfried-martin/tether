@@ -24,6 +24,7 @@ class CalendarApi(Protocol):
     async def insert_event(self, calendar_id: str, body: dict) -> bool: ...
     async def update_event(self, calendar_id: str, event_id: str, body: dict) -> bool: ...
     async def delete_event(self, calendar_id: str, event_id: str) -> None: ...
+    async def create_event(self, calendar_id: str, body: dict, *, conference: bool, send_updates: str) -> dict: ...
 
 
 class CalendarClient(GoogleClient):
@@ -76,6 +77,14 @@ class CalendarClient(GoogleClient):
             return False
         resp.raise_for_status()
         return True
+
+    async def create_event(self, calendar_id: str, body: dict, *, conference: bool, send_updates: str) -> dict:
+        """A new event with a Google-chosen ID (an owner's own event, not a hub copy). Returns Google's event.
+        conference asks Google to attach a Meet link; send_updates is "all" or "none" (guest emails)."""
+        params = {"sendUpdates": send_updates, **({"conferenceDataVersion": 1} if conference else {})}
+        resp = await self._request("POST", f"{self._cal(calendar_id)}/events", params=params, json=body)
+        resp.raise_for_status()
+        return resp.json()
 
     async def delete_event(self, calendar_id: str, event_id: str) -> None:
         """Delete; an event already gone counts as deleted."""

@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { patch, post, type AgendaEvent, type CalendarStatus, type Hold } from './api'
-import { accountStyle, errorText, Linkified, SHORT_SCREEN, useMedia, usePolling, useSwipe } from './shared'
+import { DRAFT_ID, draftEvent, EventEditor, newDraft, type Draft } from './NewEvent'
+import { accountStyle, errorText, Linkified, SHORT_SCREEN, ToastView, useMedia, usePolling, useSwipe, useToast } from './shared'
 import { linkProps, navigate, type Location } from './route'
 
 // ------------------------------------------------------------------ dates
@@ -105,6 +106,8 @@ export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLEle
   const today = isoDay(new Date())
   const anchor = validDay(loc.params.get('date')) ?? today
   const [picked, setPicked] = useState<AgendaEvent | null>(null)
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [toast, setToast] = useToast()
   const swipeTo = useRef<(dir: 1 | -1) => void>(() => {})
   const swiper = useSwipe(swipeTo)
   const short = useMedia(SHORT_SCREEN)
@@ -149,10 +152,24 @@ export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLEle
       <div className="cal-swipe" ref={swiper}>
         {view === 'schedule'
           ? <Schedule events={(agenda.data ?? []).filter((e) => dayOf(e) >= first)} today={today} loaded={!!agenda.data} />
-          : <TimeGrid days={days(first, last)} events={agenda.data ?? []} today={today} onPick={setPicked}
+          : <TimeGrid days={days(first, last)} today={today}
+                      events={draft ? [...(agenda.data ?? []), draftEvent(draft)] : agenda.data ?? []}
+                      onPick={(e) => e.id !== DRAFT_ID && setPicked(e)}
+                      onCreate={(day, minutes) => setDraft(newDraft(day, minutes))}
                       onDay={(d) => go('day', d)} />}
       </div>
       {picked && <EventDetail event={picked} onClose={() => setPicked(null)} />}
+      {draft && (
+        <EventEditor draft={draft} update={(changes) => setDraft((d) => d && { ...d, ...changes })}
+                     onClose={() => setDraft(null)}
+                     onSaved={(saved) => {
+                       setDraft(null)
+                       agenda.reload()
+                       setToast({ text: saved.shown ? `Saved to ${saved.source}.`
+                         : `Saved to ${saved.source}, which Tether doesn't show. Turn it on in Settings to see it here.` })
+                     }} />
+      )}
+      <ToastView toast={toast} />
     </main>
   )
 }
@@ -283,9 +300,16 @@ function bannerLanes(banners: Banner[]): (Banner & { lane: number })[] {
  * The all-day strip. Collapsed, it shows two rows (one on a short screen) and then a "+N more" for each day
  * with more than that; a tap on the strip (outside an event) or on the arrow opens every row.
  */
-function AllDay({ banners, dayCount, expanded, onToggle, onPick }: {
+function AllDay({ banners, dayCount, expanded, onToggle, onPick, onCreate }: {
   banners: Banner[]; dayCount: number; expanded: boolean; onToggle: () => void; onPick: (e: AgendaEvent) => void
+  onCreate: (day: number) => void
 }) {
+  const create = useCreateGesture((target, x) => {
+    const strip = target.closest<HTMLElement>('.cal-banners')
+    if (!strip || target.closest('.banner')) return
+    const rect = strip.getBoundingClientRect()
+    onCreate(Math.min(dayCount - 1, Math.max(0, Math.floor(((x - rect.left) / rect.width) * dayCount))))
+  })
   const placed = bannerLanes(banners)
   const collapsedLanes = useMedia(SHORT_SCREEN) ? 1 : 2
   const lanes = Math.max(...placed.map((b) => b.lane)) + 1
@@ -302,9 +326,10 @@ function AllDay({ banners, dayCount, expanded, onToggle, onPick }: {
       </button>
       <div className={`cal-banners${collapsible ? ' collapsible' : ''}${expanded ? ' expanded' : ''}`}
            style={{ gridColumn: `2 / span ${dayCount}`, gridTemplateColumns: `repeat(${dayCount}, minmax(0, 1fr))` }}
-           onClick={(ev) => { if (collapsible && !(ev.target as HTMLElement).closest('.banner')) onToggle() }}>
+           onClick={(ev) => { if (collapsible && ev.detail < 2 && !(ev.target as HTMLElement).closest('.banner')) onToggle() }}
+           {...create}>
         {placed.filter((b) => b.lane < shown).map(({ e, span, lane }) => (
-          <button key={e.id} className={`banner tinted ${e.busy}`}
+          <button key={e.id} className={`banner tinted ${e.busy}${e.id === DRAFT_ID ? ' draft' : ''}`}
                   style={{ ...eventStyle(e), gridColumn: `${span[0] + 1} / ${span[1] + 1}`, gridRow: lane + 1 }}
                   onClick={() => onPick(e)} title={e.title}>
             {e.title}
@@ -318,9 +343,71 @@ function AllDay({ banners, dayCount, expanded, onToggle, onPick }: {
   )
 }
 
-function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
+/**
+ * Starts a new event: a double-click with a mouse, or a long press on a touch screen. The callback
+ * gets the element under the pointer and where it was; it decides whether that spot is empty.
+ */
+function useCreateGesture(create: (target: HTMLElement, x: number, y: number) => void) {
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const fired = useRef(false)   // a long press opened the editor
+  const cancel = () => {
+    if (press.current) clearTimeout(press.current.timer)
+    press.current = null
+  }
+  return {
+    onDoubleClick: (e: React.MouseEvent) => create(e.target as HTMLElement, e.clientX, e.clientY),
+    onPointerDown: (e: React.PointerEvent) => {
+      cancel()
+      fired.current = false
+      if (e.pointerType === 'mouse' || !e.isPrimary) return
+      const target = e.target as HTMLElement, x = e.clientX, y = e.clientY
+      press.current = {
+        x, y, timer: window.setTimeout(() => {
+          press.current = null
+          fired.current = true
+          navigator.vibrate?.(10)
+          swallowNextClick()
+          create(target, x, y)
+        }, 500),
+      }
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const p = press.current
+      if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) cancel()
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    onContextMenu: (e: React.MouseEvent) => {
+      // The phone's own long-press menu would cover the editor.
+      if (press.current || fired.current || (e.nativeEvent as PointerEvent).pointerType === 'touch') e.preventDefault()
+    },
+  }
+}
+
+/**
+ * The finger lifting after a long press still clicks whatever is under it, which by then is the
+ * editor (on a phone it fills the screen). Swallow that one click, wherever it lands.
+ */
+function swallowNextClick() {
+  const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); done() }
+  const done = () => removeEventListener('click', stop, true)
+  addEventListener('click', stop, true)
+  // Cancelling the touch's end also stops the mouse events that would move focus off the title.
+  addEventListener('touchend', (e) => { e.preventDefault(); setTimeout(done, 400) },
+                   { once: true, capture: true, passive: false })
+}
+
+function TimeGrid({ days: dayList, events, today, onPick, onDay, onCreate }: {
   days: string[]; events: AgendaEvent[]; today: string; onPick: (e: AgendaEvent) => void; onDay: (day: string) => void
+  onCreate: (day: string, minutes: number | null) => void
 }) {
+  // An empty spot in a day column: a timed event starting at that quarter hour.
+  const create = useCreateGesture((target, _x, y) => {
+    const col = target.closest<HTMLElement>('.cal-col')
+    if (!col?.dataset.day || target.closest('.slot')) return
+    const minutes = Math.floor(((y - col.getBoundingClientRect().top) / HOUR) * 4) * 15
+    onCreate(col.dataset.day, Math.min(23 * 60 + 30, Math.max(0, minutes)))
+  })
   const scroller = useRef<HTMLDivElement>(null)
   const [allDayOpen, setAllDayOpen] = useState(false)
   const [now, setNow] = useState(() => new Date())
@@ -362,10 +449,11 @@ function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
         })}
         {banners.length > 0 && (
           <AllDay banners={banners} dayCount={dayList.length} expanded={allDayOpen}
-                  onToggle={() => setAllDayOpen(!allDayOpen)} onPick={onPick} />
+                  onToggle={() => setAllDayOpen(!allDayOpen)} onPick={onPick}
+                  onCreate={(day) => onCreate(dayList[day], null)} />
         )}
       </div>
-      <div className="cal-body" style={{ ...cols, height: 24 * HOUR }}>
+      <div className="cal-body" style={{ ...cols, height: 24 * HOUR }} {...create}>
         <div className="cal-gutter hours">
           {Array.from({ length: 23 }, (_, n) => (
             <span key={n} style={{ top: (n + 1) * HOUR }}>
@@ -374,13 +462,13 @@ function TimeGrid({ days: dayList, events, today, onPick, onDay }: {
           ))}
         </div>
         {dayList.map((d) => (
-          <div key={d} className={`cal-col${d === today ? ' today' : ''}`}>
+          <div key={d} className={`cal-col${d === today ? ' today' : ''}`} data-day={d}>
             {layoutDay(d, timed).map((p) => {
               const height = (p.bottom - p.top) * HOUR / 60 - 2
               const past = new Date(p.event.end) < now
               return (
                 <button key={p.event.id}
-                        className={`slot tinted ${p.event.busy}${past ? ' past' : ''}${height < 34 ? ' short' : ''}`}
+                        className={`slot tinted ${p.event.busy}${past ? ' past' : ''}${height < 34 ? ' short' : ''}${p.event.id === DRAFT_ID ? ' draft' : ''}`}
                         style={{ ...eventStyle(p.event), top: p.top * HOUR / 60, height,
                                  left: `${(p.col / p.cols) * 100}%`, width: `calc(${100 / p.cols}% - 2px)` }}
                         onClick={() => onPick(p.event)}
