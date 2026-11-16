@@ -4,6 +4,7 @@ import { accountStyle, DueLabel, errorText, PAGE_SIZE, Pager, pageParam, relativ
 import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
 import { TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
+import { InstallBanner } from './Install'
 import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location } from './route'
 
 const NAV = [['inbox', 'Inbox'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['settings', 'Settings']] as const
@@ -22,7 +23,7 @@ export default function App() {
   useEffect(() => { if (me && !page) navigate(lastLocation(), { replace: true }) }, [me, page])
 
   if (me === undefined) return <main className="center muted">Loading…</main>
-  if (me === null) return <Login />
+  if (me === null) return <><InstallBanner /><Login /></>
 
   return (
     <div className="app">
@@ -36,6 +37,7 @@ export default function App() {
           ))}
         </nav>
       </header>
+      <InstallBanner />
       {page === 'settings' ? <Settings onSignedOut={() => setMe(null)} />
         : page === 'tasks' ? <TasksPage loc={loc} />
         : page === 'calendar' ? <CalendarPage loc={loc} />

@@ -104,6 +104,8 @@ export function CalendarPage({ loc }: { loc: Location }) {
   const today = isoDay(new Date())
   const anchor = validDay(loc.params.get('date')) ?? today
   const [picked, setPicked] = useState<AgendaEvent | null>(null)
+  const swipeTo = useRef<(dir: 1 | -1) => void>(() => {})
+  const swiper = useSwipe(swipeTo)
 
   useEffect(() => { if (!view) navigate(`/calendar/${savedView()}${location.search}`, { replace: true }) }, [view])
   useEffect(() => {
@@ -117,6 +119,7 @@ export function CalendarPage({ loc }: { loc: Location }) {
 
   const go = (to: View, date: string) => navigate(`/calendar/${to}${date === today ? '' : `?date=${date}`}`)
   const step = VIEWS.find((v) => v.id === view)!.step
+  swipeTo.current = (dir) => go(view, plusDays(anchor, dir * step))
 
   return (
     <main className={`calendar-page view-${view}`}>
@@ -137,13 +140,76 @@ export function CalendarPage({ loc }: { loc: Location }) {
         </select>
       </div>
       {agenda.error && <p className="error">Couldn't load the calendar: {agenda.error}</p>}
-      {view === 'schedule'
-        ? <Schedule events={(agenda.data ?? []).filter((e) => dayOf(e) >= first)} today={today} loaded={!!agenda.data} />
-        : <TimeGrid days={days(first, last)} events={agenda.data ?? []} today={today} onPick={setPicked}
-                    onDay={(d) => go('day', d)} />}
+      <div className="cal-swipe" ref={swiper}>
+        {view === 'schedule'
+          ? <Schedule events={(agenda.data ?? []).filter((e) => dayOf(e) >= first)} today={today} loaded={!!agenda.data} />
+          : <TimeGrid days={days(first, last)} events={agenda.data ?? []} today={today} onPick={setPicked}
+                      onDay={(d) => go('day', d)} />}
+      </div>
       {picked && <EventDetail event={picked} onClose={() => setPicked(null)} />}
     </main>
   )
+}
+
+/**
+ * Swipe left for the next range and right for the previous one. The view follows the
+ * finger while it moves sideways, then slides in from that side when the swipe counts.
+ * Mostly-vertical drags are left to scrolling.
+ */
+function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => void>) {
+  const [el, setEl] = useState<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!el) return
+    let x0 = 0, y0 = 0, t0 = 0, axis: 'x' | 'y' | null = null, dx = 0
+    const reset = (animate: boolean) => {
+      el.style.transition = animate ? 'transform 160ms ease-out, opacity 160ms ease-out' : ''
+      el.style.transform = ''
+      el.style.opacity = ''
+    }
+    const start = (e: TouchEvent) => {
+      if (e.touches.length !== 1) { axis = 'y'; return }
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = e.timeStamp; axis = null; dx = 0
+    }
+    const move = (e: TouchEvent) => {
+      if (axis === 'y' || e.touches.length !== 1) return
+      dx = e.touches[0].clientX - x0
+      const dy = e.touches[0].clientY - y0
+      if (!axis) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+        axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y'
+        if (axis === 'y') return
+      }
+      e.preventDefault()   // keep a sideways drag from scrolling or going back a page
+      el.style.transition = ''
+      el.style.transform = `translateX(${dx}px)`
+      el.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / el.clientWidth))
+    }
+    const end = (e: TouchEvent) => {
+      if (axis !== 'x') return
+      axis = null
+      const fast = Math.abs(dx) > 40 && e.timeStamp - t0 < 300
+      if (Math.abs(dx) < el.clientWidth * 0.22 && !fast) { reset(true); return }
+      const dir = dx < 0 ? 1 : -1
+      // Jump to the far side, then glide back into place with the new range.
+      el.style.transition = ''
+      el.style.transform = `translateX(${dir * 40}%)`
+      el.style.opacity = '0.4'
+      onSwipe.current(dir)
+      requestAnimationFrame(() => requestAnimationFrame(() => reset(true)))
+    }
+    const cancel = () => { axis = null; reset(true) }
+    el.addEventListener('touchstart', start, { passive: true })
+    el.addEventListener('touchmove', move, { passive: false })
+    el.addEventListener('touchend', end)
+    el.addEventListener('touchcancel', cancel)
+    return () => {
+      el.removeEventListener('touchstart', start)
+      el.removeEventListener('touchmove', move)
+      el.removeEventListener('touchend', end)
+      el.removeEventListener('touchcancel', cancel)
+    }
+  }, [el, onSwipe])
+  return setEl
 }
 
 // ------------------------------------------------------------------ schedule

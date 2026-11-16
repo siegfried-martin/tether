@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { get, Unauthorized } from './api'
 
 const REFRESH_MS = 60_000
@@ -16,11 +16,14 @@ export function relativeTime(iso: string | null): string {
 export function usePolling<T>(path: string): { data: T | null; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const current = useRef(path)
+  current.current = path
   const reload = useCallback(() => {
     if (!path) return
     get<T>(path)
-      .then((d) => { setData(d); setError(null) })
+      .then((d) => { if (current.current === path) { setData(d); setError(null) } })   // drop a stale answer
       .catch((e) => {
+        if (current.current !== path) return
         if (e instanceof Unauthorized) location.reload()
         else setError(String(e.message ?? e))
       })
