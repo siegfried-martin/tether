@@ -149,11 +149,12 @@ export function DueLabel({ due }: { due: string | null }) {
 }
 
 /**
- * A sideways swipe on touch screens: left calls onSwipe(1) (next), right onSwipe(-1).
+ * A sideways swipe on touch screens: left calls onSwipe(1) (next), right onSwipe(-1);
+ * onSwipe returns false if there is nothing that way.
  * With follow, the element tracks the finger, then slides in from that side when the
  * swipe counts. Mostly-vertical drags are left to scrolling. Returns a ref callback.
  */
-export function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => void>, { follow = true } = {}) {
+export function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => boolean | void>, { follow = true } = {}) {
   const [el, setEl] = useState<HTMLElement | null>(null)
   useEffect(() => {
     if (!el) return
@@ -188,12 +189,13 @@ export function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => void>,
       const fast = Math.abs(dx) > 40 && e.timeStamp - t0 < 300
       if (Math.abs(dx) < el.clientWidth * 0.22 && !fast) { reset(true); return }
       const dir = dx < 0 ? 1 : -1
-      if (!follow) { onSwipe.current(dir); return }
-      // Jump to the far side, then glide back into place with the new range.
+      // onSwipe returns false when there is nowhere to go (the first or last page): spring back.
+      if (onSwipe.current(dir) === false) { reset(true); return }
+      if (!follow) return
+      // Jump to the far side, then glide back into place with the new content.
       el.style.transition = ''
       el.style.transform = `translateX(${dir * 40}%)`
       el.style.opacity = '0.4'
-      onSwipe.current(dir)
       requestAnimationFrame(() => requestAnimationFrame(() => reset(true)))
     }
     const cancel = () => { axis = null; reset(true) }

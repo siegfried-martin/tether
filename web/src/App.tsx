@@ -5,7 +5,7 @@ import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
 import { TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
 import { InstallBanner } from './Install'
-import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location } from './route'
+import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location, type Page } from './route'
 
 const NAV = [['inbox', 'Inbox'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['settings', 'Settings']] as const
 
@@ -21,14 +21,6 @@ export default function App() {
   const loc = useLocation()
   const page = pageOf(loc.path)
   const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null)   // where a page can put controls in the header
-  // On a phone, a swipe across the header moves to the next or previous page.
-  const swipePage = useRef<(dir: 1 | -1) => void>(() => {})
-  swipePage.current = (dir) => {
-    const at = NAV.findIndex(([to]) => to === page)
-    const next = NAV[at + dir]
-    if (at >= 0 && next) navigate(`/${next[0]}`)
-  }
-  const barSwipe = useSwipe(swipePage, { follow: false })
 
   useEffect(() => {
     get<{ email: string }>('/api/me')
@@ -43,27 +35,63 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="bar" ref={barSwipe}>
+      <header className="bar">
         <a className="brand" {...linkProps('/inbox')}>
           <img src="/icon.svg" alt="" width="28" height="28" /><span className="brand-name">Tether</span>
         </a>
         <div className="bar-slot" ref={setBarSlot} />
-        <nav>
+        <nav className="tabs">
           {NAV.map(([to, label]) => (
             <a key={to} className={page === to ? 'active' : ''} aria-current={page === to ? 'page' : undefined}
                {...linkProps(`/${to}`)}>
-              <svg className="nav-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none"
-                   stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{NAV_ICONS[to]}</svg>
+              <NavIcon page={to} />
               {label}
             </a>
           ))}
         </nav>
+        {page && <PageCarousel page={page} />}
       </header>
       <InstallBanner />
       {page === 'settings' ? <Settings onSignedOut={() => setMe(null)} />
         : page === 'tasks' ? <TasksPage loc={loc} />
         : page === 'calendar' ? <CalendarPage loc={loc} barSlot={barSlot} />
         : page === 'inbox' ? <Home loc={loc} /> : null}
+    </div>
+  )
+}
+
+const NavIcon = ({ page, size = 20 }: { page: (typeof NAV)[number][0]; size?: number }) => (
+  <svg className="nav-icon" viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" fill="none"
+       stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{NAV_ICONS[page]}</svg>
+)
+
+/**
+ * The page switcher on phones: the current page in the middle, its neighbours at the
+ * sides, and dots for where it sits. Swipe it (or tap a side) to move one page over.
+ */
+function PageCarousel({ page }: { page: Page }) {
+  const at = NAV.findIndex(([to]) => to === page)
+  const prev = NAV[at - 1], next = NAV[at + 1]
+  const go = useRef<(dir: 1 | -1) => boolean>(() => false)
+  go.current = (dir) => {
+    const to = NAV[at + dir]
+    if (!to) return false
+    navigate(`/${to[0]}`)
+    return true
+  }
+  const swipe = useSwipe(go)
+  return (
+    <div className="page-carousel" ref={swipe} aria-label="Pages">
+      {prev
+        ? <a className="pc-side prev" {...linkProps(`/${prev[0]}`)}><span aria-hidden="true">‹</span> {prev[1]}</a>
+        : <span className="pc-side" />}
+      <div className="pc-current" aria-current="page">
+        <span className="pc-label"><NavIcon page={page} size={18} />{NAV[at][1]}</span>
+        <span className="pc-dots" aria-hidden="true">{NAV.map(([to]) => <i key={to} className={to === page ? 'on' : ''} />)}</span>
+      </div>
+      {next
+        ? <a className="pc-side next" {...linkProps(`/${next[0]}`)}>{next[1]} <span aria-hidden="true">›</span></a>
+        : <span className="pc-side" />}
     </div>
   )
 }
