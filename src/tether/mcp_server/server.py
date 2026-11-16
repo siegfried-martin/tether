@@ -20,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tether.config import Settings
 from tether.mcp_server.provider import ConsentRequests, TetherOAuthProvider
-from tether.services import items, mail, overview, sync_state, tasks, triage
+from tether.services import digest, items, mail, overview, sync_state, tasks, triage
 from tether.services.triage import GmailFactory
 
 MCP_PATH = "/mcp"
@@ -39,7 +39,7 @@ class ThreadRef(BaseModel):
     thread_id: str
 
 
-USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError)
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError)
 
 
 def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
@@ -158,6 +158,17 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection],
         "attachments listed by name. Fetched live and not stored. account is the mailbox address."))
     async def get_thread(account: str, thread_id: str) -> dict:
         return await _guard(mail.get_thread(get_conn(), gmail, account, thread_id))
+
+    @server.tool(description=(
+        "Ingest a work-mail digest the owner pasted (ITEM blocks with From, Subject, Received, Needed, Due, "
+        "Priority, Link). Pass the pasted text through verbatim as raw_text: do not reformat, summarize or "
+        "fill in fields; the server parses it. digest_date (YYYY-MM-DD) is the day the digest was written, "
+        "used when a block has no Received time; it defaults to today. Items land in the inbox under the "
+        "digest account. Show the owner any rejected blocks and warnings rather than guessing the missing "
+        f"fields. Times without an offset are read in {settings.timezone}."))
+    async def ingest_digest(raw_text: str, digest_date: str | None = None) -> dict:
+        return _sync_guard(digest.ingest_digest, get_conn(), raw_text, tz=settings.tz, today=settings.today(),
+                           digest_date=digest_date, label=settings.digest_label)
 
     host = urlparse(base).netloc
     app = server.streamable_http_app(

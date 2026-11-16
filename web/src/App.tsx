@@ -94,7 +94,12 @@ function Home() {
 
   const makeTask = async (item: Item) => {
     try {
-      await post<Task>('/api/tasks', { title: item.title, item_id: item.id })
+      // A digest item already says what is needed, by when and how urgently.
+      const fromDigest = item.kind === 'digest'
+      await post<Task>('/api/tasks', {
+        title: (fromDigest && item.needed) || item.title, item_id: item.id,
+        due_at: fromDigest ? item.due_at : null, priority: fromDigest && item.priority === 'high' ? 'high' : null,
+      })
       setToast({ text: 'Added to Tasks. Completing it archives this email.' })
     } catch (e) {
       setToast({ text: errorText(e), error: true })
@@ -219,7 +224,11 @@ function ItemRow({ item, onAction, onTask }: { item: Item; onAction: () => void;
           <span className="title">{item.title}</span>
           {item.snippet && <span className="snippet">{item.snippet}</span>}
         </span>
-        <time dateTime={item.last_activity_at}>{relativeTime(item.last_activity_at)}</time>
+        <span className="item-time">
+          {item.priority === 'high' && <span className="flag">High</span>}
+          <DueLabel due={item.due_at} />
+          <time dateTime={item.last_activity_at}>{relativeTime(item.last_activity_at)}</time>
+        </span>
       </span>
     </>
   )
@@ -255,6 +264,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
         {accounts.data?.length === 0 && <p className="muted">No accounts yet.</p>}
         <a className="button" href="/accounts/google/connect">Connect a Google account</a>
       </section>
+      <DigestPanel onIngested={accounts.reload} />
       <section>
         <h2>Sync</h2>
         <table className="sync">
@@ -278,6 +288,57 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
   )
 }
 
+type DigestResult = {
+  created: number; duplicates: number
+  rejected: { block: string; reason: string }[]; warnings: { block: string; reason: string }[]
+}
+
+function DigestPanel({ onIngested }: { onIngested: () => void }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<DigestResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const out = await post<DigestResult>('/api/digest', { raw_text: text })
+      setResult(out)
+      if (!out.rejected.length) setText('')
+      onIngested()
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section>
+      <h2>Work digest</h2>
+      <p className="muted">
+        Paste the digest from your work assistant. Items land in the inbox under the digest account. You can
+        also paste it to Claude, which passes it to Tether unchanged.
+      </p>
+      <form className="digest-form" onSubmit={submit}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} aria-label="Digest text"
+                  placeholder={'ITEM\nFrom: …\nSubject: …\nReceived: …\nNeeded: …\nDue: …\nPriority: …\nLink: …'} />
+        <button className="button" disabled={!text.trim() || busy}>Add to inbox</button>
+      </form>
+      {error && <p className="error">{error}</p>}
+      {result && (
+        <div className="digest-result" role="status">
+          <p>{result.created} new, {result.duplicates} already in Tether.</p>
+          {result.rejected.map((r, n) => (
+            <p key={`r${n}`} className="error">Skipped: {r.reason} <span className="muted">{r.block}</span></p>
+          ))}
+          {result.warnings.map((w, n) => <p key={`w${n}`} className="muted">{w.block}: {w.reason}</p>)}
+        </div>
+      )}
+    </section>
+  )
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   personal: 'Primary',
   updates: 'Updates',
@@ -294,7 +355,7 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
         <ColorPicker account={account} onSaved={onSaved} />
         <span className="grow">{account.label}</span>
         <span className={`status ${account.status}`}>
-          {account.status === 'ok' ? 'connected' : account.status.replace('_', ' ')}
+          {account.kind === 'digest' ? 'digest' : account.status === 'ok' ? 'connected' : account.status.replace('_', ' ')}
         </span>
         {account.sync && (
           <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>

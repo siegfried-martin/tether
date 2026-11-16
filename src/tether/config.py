@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # and the agenda, and how the work digest's times are read.
     timezone: str = "UTC"
 
+    # Label of the account that holds work-digest items (created on the first ingest).
+    digest_label: str = "Work"
+
     initial_sync_days: int = 14
     gmail_poll_seconds: int = 60
 

@@ -101,7 +101,8 @@ h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; colo
 }
 .sender { grid-area: sender; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subject { grid-area: subject; min-width: 0; display: flex; flex-direction: column; }
-time { grid-area: time; color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.item-time { grid-area: time; display: flex; gap: 8px; align-items: baseline; }
+time { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
 .title, .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snippet { color: var(--muted); font-size: 0.9rem; }
 
@@ -212,3 +213,10 @@ button.link.danger { color: var(--urgent-text); }
   .task-editor { margin-left: 0; }
   nav a { padding: 4px 6px; }
 }
+
+.digest-form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.digest-form textarea {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 0.9rem; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; resize: vertical;
+}
+.digest-result p { margin: 6px 0; overflow-wrap: anywhere; }

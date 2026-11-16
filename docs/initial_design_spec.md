@@ -164,7 +164,15 @@ ingest_digest(raw_text: str, digest_date: date | None = None)
 
 ### Where items land
 
-Digest items go into the inbox under the digest account, not straight into tasks. That keeps one triage surface, and converting to a task is the same one tap as for any other item.
+Digest items go into the inbox under the digest account, not straight into tasks. That keeps one triage surface, and converting to a task is the same one tap as for any other item. A task made from a digest item takes its Needed text as the title and carries its due date and high priority.
+
+### As built
+
+- The digest account is created on the first ingest, labelled `TETHER_DIGEST_LABEL` (default `Work`).
+- The result also carries `warnings` (a Received or Due value that could not be read; an unreadable Due is kept in Needed) and `item_ids`.
+- Labels count only at a line start when the digest kept its line breaks, so `Fwd: Due: invoice` stays in the subject. A collapsed digest matches labels anywhere. Markdown bold, bullets and `[text](url)` links are tolerated.
+- Due accepts ISO dates, common date forms, `today`, `tomorrow` and weekday names (the next one on or after the digest date).
+- The app has a paste box in Settings (`POST /api/digest`) as well as the MCP tool. The prompt for the work assistant is in `docs/work_digest_prompt.md`.
 
 ## Follow-ups
 

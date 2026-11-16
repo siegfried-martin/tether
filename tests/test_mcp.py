@@ -109,7 +109,7 @@ def test_full_flow_then_tool_call(client, monkeypatch):
     tools = rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
     assert {t["name"] for t in tools} == {
         "sync_status", "list_items", "archive_item", "unarchive_item", "get_overview", "list_tasks",
-        "create_task", "update_task", "complete_task", "search_mail", "get_thread"}
+        "create_task", "update_task", "complete_task", "search_mail", "get_thread", "ingest_digest"}
     called = rpc(client, tokens["access_token"], "tools/call", {"name": "sync_status", "arguments": {}})
     assert called.status_code == 200 and "error" not in called.json()
 
@@ -223,3 +223,17 @@ def test_task_from_search_flow(client, conn, fake_gmail, monkeypatch):
     assert call("complete_task", id=task["id"])["status"] == "done"
     overview = call("get_overview")
     assert overview["tasks"]["count"] == 0
+
+
+def test_ingest_digest_tool(client, conn, monkeypatch):
+    import json
+    _, _, _, tokens = connect(client, monkeypatch)
+
+    def call(name, **args):
+        return rpc(client, tokens["access_token"], "tools/call", {"name": name, "arguments": args}).json()["result"]
+
+    out = json.loads(call("ingest_digest", raw_text="ITEM From: Ann Subject: Plat Needed: Review Priority: high",
+                          digest_date="2026-11-15")["content"][0]["text"])
+    assert out["created"] == 1 and out["rejected"] == []
+    bad = call("ingest_digest", raw_text="NO ACTION ITEMS", digest_date="soon")
+    assert bad["isError"] and "digest_date" in bad["content"][0]["text"]

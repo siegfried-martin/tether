@@ -31,7 +31,7 @@ from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import GmailPoller
-from tether.services import accounts, items, mail, overview, sync_state, tasks, triage
+from tether.services import accounts, digest, items, mail, overview, sync_state, tasks, triage
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,11 @@ class TaskCreate(BaseModel):
     priority: str | None = None
 
 
+class DigestIn(BaseModel):
+    raw_text: str
+    digest_date: str | None = None
+
+
 class TaskUpdate(BaseModel):
     """Only the fields sent are changed; an explicit null clears one."""
     title: str | None = None
@@ -64,7 +69,7 @@ class TaskUpdate(BaseModel):
     parent_id: int | None = None
 
 
-USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError)
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError)
 
 
 @contextlib.contextmanager
@@ -333,6 +338,13 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         with user_errors():
             return await mail.search_mail(request.app.state.conn, request.app.state.gmail_clients, q,
                                           account=account, limit=limit)
+
+    @app.post("/api/digest")
+    async def ingest_digest(body: DigestIn, _: str = Depends(require_user),
+                            conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return digest.ingest_digest(conn, body.raw_text, tz=settings.tz, today=settings.today(),
+                                        digest_date=body.digest_date, label=settings.digest_label)
 
     # -------------------------------------------------------------- static
 

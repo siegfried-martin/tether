@@ -10,6 +10,7 @@ dependencies = [
     "itsdangerous>=2.2.0",
     "mcp>=1",
     "pydantic-settings>=2.16.3",
+    "python-dateutil>=4.0.0",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -30,4 +31,5 @@ filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
 dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
+    "types-python-dateutil>=2.9.0.20261104",
 ]
