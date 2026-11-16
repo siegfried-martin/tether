@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tether · Inbox, tasks and calendar in one place</title>
+<meta name="description" content="Tether is a personal app that brings its owner's Gmail inboxes, Google calendars and tasks together in one place.">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32"> Tether</a>
+  <nav aria-label="Site"><a href="/" aria-current="page">Home</a><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a></nav>
+</header>
+<main>
+  <h1>Your inboxes, tasks and calendars in one place</h1>
+  <p class="lede">Tether is a personal productivity app. It gathers its owner's Gmail inboxes, Google calendars,
+    a work calendar and to-do list into one view, so nothing gets lost between accounts.</p>
+  <p><a class="button" href="/auth/login">Sign in with Google</a></p>
+
+  <h2>What Tether does</h2>
+  <ul class="features">
+    <li><strong>One inbox</strong>Inbox threads from several Gmail accounts in one list, each marked with its
+      account's color. Archive a thread in Tether and it is archived in Gmail.</li>
+    <li><strong>One calendar</strong>Events from the calendars the owner chooses, merged into one calendar
+      with each event showing which calendar it came from. New events can be created on any of them.</li>
+    <li><strong>Tasks</strong>A to-do list, with tasks linked to the emails they came from.</li>
+    <li><strong>An assistant's view</strong>The owner's AI assistant can read the same overview to help triage,
+      only when the owner asks it to.</li>
+  </ul>
+
+  <h2>Who can use it</h2>
+  <p>Tether is run by its owner, for the owner. It is not a public service: only the owner's own Google account
+    can sign in, and only the owner's own accounts are connected. Anyone else who signs in is turned away.</p>
+
+  <h2>How Tether uses Google data</h2>
+  <p>Tether asks Google for these permissions when an account is connected, and uses each only as described:</p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Permission</th><th>What Tether does with it</th></tr>
+    <tr><td>Sign-in (<code>openid</code>, <code>email</code>)</td><td>Confirms that the person signing in is the owner, and names each connected account.</td></tr>
+    <tr><td>Gmail (<code>gmail.modify</code>)</td><td>Lists inbox threads (sender, subject, date and a short snippet), archives and unarchives
+      threads when the owner asks, and shows a message's text when the owner opens it. Tether never sends or deletes email.</td></tr>
+    <tr><td>Calendar (<code>calendar.readonly</code>, <code>calendar.events</code>)</td><td>Reads events from the calendars the owner selects to build the merged calendar, writes that merged
+      calendar to one calendar in the owner's account, and creates events the owner makes in Tether.</td></tr>
+  </table>
+  </div>
+  <p>Google data is never sold, shared with anyone else or used for advertising. Message bodies are not stored.
+    The <a href="/privacy.html">privacy policy</a> has the details, and the <a href="/terms.html">terms of service</a>
+    say what using Tether means.</p>
+</main>
+<footer>
+  <span>© 2026 Tether</span>
+  <a href="/privacy.html">Privacy policy</a>
+  <a href="/terms.html">Terms of service</a>
+</footer>
+</body>
+</html>

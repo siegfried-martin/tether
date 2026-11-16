@@ -638,3 +638,7 @@ main.calendar-page:not(.view-schedule) .cal-swipe { flex: 1; min-height: 0; disp
   .ne-repeat { flex: 1 1 180px; }
   .ne-calendar { flex-basis: 160px; }
 }
+
+.policy-links { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.88rem; padding: 8px 0 16px; }
+.policy-links a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+.center .policy-links { justify-content: center; }

@@ -96,12 +96,20 @@ function PageCarousel({ page }: { page: Page }) {
   )
 }
 
+/** The public pages Google's consent screen points to. Full page loads: they are not part of the app. */
+const PolicyLinks = () => (
+  <nav className="policy-links" aria-label="About Tether">
+    <a href="/about">About</a><a href="/privacy.html">Privacy policy</a><a href="/terms.html">Terms of service</a>
+  </nav>
+)
+
 function Login() {
   return (
     <main className="center login">
       <img src="/icon.svg" alt="" width="72" height="72" />
       <h1>Tether</h1>
       <a className="button" href="/auth/login">Sign in with Google</a>
+      <PolicyLinks />
     </main>
   )
 }
@@ -348,6 +356,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
       <section>
         <button className="button secondary" onClick={() => post('/auth/logout').then(onSignedOut)}>Sign out</button>
       </section>
+      <PolicyLinks />
     </main>
   )
 }

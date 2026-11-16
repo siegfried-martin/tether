@@ -452,9 +452,14 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         app.mount("/assets", StaticFiles(directory=static_dir / "assets", check_dir=False), name="assets")
 
         @app.get("/{path:path}", include_in_schema=False)
-        async def spa(path: str):
+        async def spa(path: str, request: Request):
             if path.startswith(("api/", "auth/", "accounts/", ".well-known/")):
                 raise HTTPException(404)
+            # The home page Google's consent screen links to: public, says what Tether is and links the policies.
+            # Signed in, / is the app as usual.
+            if path in ("", "about") and (path == "about" or not request.session.get("user")) \
+                    and (static_dir / "home.html").is_file():
+                return FileResponse(static_dir / "home.html", headers={"Cache-Control": "no-cache", "X-Tether-Page": "home"})
             candidate = (static_dir / path).resolve()
             if path and candidate.is_file() and candidate.is_relative_to(static_dir.resolve()):
                 return FileResponse(candidate)

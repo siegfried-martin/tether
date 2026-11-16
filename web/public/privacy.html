@@ -4,51 +4,76 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tether · Privacy policy</title>
-<style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
-  body { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
-</style>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
 </head>
 <body>
-<h1>Tether privacy policy</h1>
-<p>Last updated November 15, 2026.</p>
+<header class="site-head">
+  <a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32"> Tether</a>
+  <nav aria-label="Site"><a href="/">Home</a><a href="/privacy.html" aria-current="page">Privacy</a><a href="/terms.html">Terms</a></nav>
+</header>
+<main>
+<h1>Privacy policy</h1>
+<p class="updated">Last updated November 16, 2026.</p>
 
-<p>Tether is a personal, single-user application. It is used only by its owner, to triage their own
-email, calendars and tasks. Only the owner can sign in, and only the owner's own Google accounts
-are connected.</p>
+<p>Tether is a personal, single-user application. It is used only by its owner, to manage their own email,
+calendars and tasks. Only the owner can sign in, and only the owner's own Google accounts are connected. This
+policy describes what Tether does with the data it can reach.</p>
 
 <h2>Data Tether accesses</h2>
 <ul>
-  <li><strong>Gmail</strong> (<code>gmail.modify</code>): message metadata (sender, recipients,
-    subject, date, labels) and snippets, to build an inbox list; labels, to archive and unarchive
-    threads; and message content, fetched on request when the owner asks their assistant to read
-    or search mail.</li>
-  <li><strong>Google Calendar</strong>: events on calendars the owner selects, to merge them into
-    one calendar in the owner's own account, and to create or update events when the owner asks.</li>
-  <li><strong>Google sign-in</strong>: the email address and account ID, to confirm the owner is
-    the one signing in.</li>
+  <li><strong>Google sign-in</strong> (<code>openid</code>, <code>email</code>): the account's email address and ID,
+    to confirm that the person signing in is the owner and to label each connected account.</li>
+  <li><strong>Gmail</strong> (<code>gmail.modify</code>): message metadata (sender, recipients, subject, date, labels)
+    and short snippets, to build the inbox list; labels, to archive and unarchive threads when the owner asks; and
+    message content, fetched when the owner opens a thread or asks their assistant to read or search mail.
+    Tether does not send, draft or delete email.</li>
+  <li><strong>Google Calendar</strong> (<code>calendar.readonly</code>, <code>calendar.events</code>): the list of the
+    owner's calendars, and events on the calendars the owner selects, to merge them into one calendar; writing that
+    merged calendar to one calendar in the owner's own account; and creating events the owner makes in Tether,
+    including any guests, location, description and video link the owner adds.</li>
+  <li><strong>Other calendars</strong>: a calendar feed (ICS link) the owner provides, read the same way.</li>
 </ul>
 
-<h2>What is stored</h2>
-<p>Tether stores message metadata, short snippets, links back to Gmail, calendar event details
-inside a rolling window, and the owner's own tasks. It does not store message bodies. OAuth tokens
-are encrypted at rest. Data is kept on a private server operated by the owner.</p>
+<h2>How the data is used</h2>
+<p>Only to show the owner their own inbox, calendar and tasks, and to carry out actions the owner takes. Tether does
+not use Google user data for advertising, does not sell it, and does not use it to train AI models. When the owner
+asks their own AI assistant to help with their inbox or calendar, Tether passes it the data that request needs, on
+the owner's behalf.</p>
+<p>Tether's use and transfer of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+including the Limited Use requirements.</p>
+
+<h2>What is stored, and for how long</h2>
+<ul>
+  <li>Message metadata, short snippets and links back to Gmail, for threads in the inbox window. Message bodies are
+    not stored; they are fetched when opened and discarded.</li>
+  <li>Calendar events from the selected calendars, fetched for a window around today.</li>
+  <li>The owner's tasks and settings.</li>
+  <li>OAuth tokens, encrypted at rest.</li>
+</ul>
+<p>Data is kept on a private server operated by the owner, reached only over HTTPS. Logs record technical events
+only, never email or event content.</p>
 
 <h2>Sharing</h2>
-<p>Tether does not sell, share or transfer Google user data to anyone. Message content is passed
-to the owner's own AI assistant only when the owner's assistant requests it on the owner's behalf.
-No data is used for advertising.</p>
-<p>Tether's use of information received from Google APIs adheres to the
-<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User
-Data Policy</a>, including the Limited Use requirements.</p>
+<p>Tether does not share, sell or transfer Google user data to any third party. When the owner invites guests to an
+event, Google sends them the invitation, as it does for any calendar event.</p>
 
-<h2>Deletion</h2>
-<p>Disconnecting an account, or revoking Tether's access at
-<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, stops all
-access. The owner can delete all stored data at any time.</p>
+<h2>Deletion and revoking access</h2>
+<p>Removing Tether's access at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>
+stops all access to that account at once. Turning a calendar off in Tether's settings deletes its stored events.
+The owner can delete any or all stored data from the server at any time.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the new version is posted here with a new date.</p>
 
 <h2>Contact</h2>
-<p>Use the support email shown on Tether's Google sign-in screen.</p>
+<p>Questions about this policy can go to the support email shown on Tether's Google sign-in screen.</p>
+</main>
+<footer>
+  <span>© 2026 Tether</span>
+  <a href="/">Home</a>
+  <a href="/terms.html">Terms of service</a>
+</footer>
 </body>
 </html>

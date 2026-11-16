@@ -103,7 +103,7 @@ Everything polls except Slack (post-MVP), which holds a socket. Polling needs no
 
 - `gmail.modify` is the minimum scope, because archiving changes labels. It also covers reading and writing drafts, so no separate compose scope is requested.
 - `calendar.events` is requested on every account at connect time, so future event writes from Claude need no reconnect. The hub still writes only to the hub account.
-- The OAuth app is for personal use and is not submitted for verification, so Google shows the "unverified app" screen at consent. This is expected. Google's verification banner and its URL checks only apply to a review submission, which is never made. The app serves a privacy page at `/privacy.html` for the consent screen.
+- The OAuth app is for personal use and is not submitted for verification, so Google shows the "unverified app" screen at consent. This is expected. Google's verification banner and its URL checks only apply to a review submission, which is never made. The app serves public pages for the consent screen's Branding fields: a home page at `/` (to visitors who aren't signed in; also `/about`), `/privacy.html` and `/terms.html`.
 - First sync: record the mailbox history ID first, then import INBOX threads inside the initial-sync window, then poll history from the recorded ID. Changes made during the import are replayed, not lost.
 - An expired history ID triggers a full reconcile for that account. List every INBOX thread ID, archive open items that are no longer in, import new threads only if they fall inside the initial-sync window, then resume from the current history ID.
 - Sent messages arrive in the same history stream. They set `last_direction`, apply the sent-only rule, and resolve follow-ups.

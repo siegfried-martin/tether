@@ -26,7 +26,8 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((resp) => {
-          if (resp.ok) {
+          // The public home page is served at / when signed out; it must not become the cached app shell.
+          if (resp.ok && !(key === '/' && resp.headers.get('X-Tether-Page') === 'home')) {
             const copy = resp.clone()
             caches.open(CACHE).then((c) => c.put(key, copy))
           }

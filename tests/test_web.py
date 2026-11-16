@@ -134,3 +134,20 @@ def test_sync_settings_api(client, conn, monkeypatch):
     assert resp.json()["account"]["sync"] == {**view["sync"], "excluded_categories": ["updates"], "initial_sync_days": 7}
     assert client.patch(f"/api/accounts/{acct}/sync", json={"initial_sync_days": 500}).status_code == 422
     assert client.patch("/api/accounts/999/sync", json={"initial_sync_days": 5}).status_code == 404
+
+
+def test_home_page_for_visitors(settings, conn, monkeypatch, tmp_path):
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("app shell")
+    (static / "home.html").write_text("public home")
+    (static / "privacy.html").write_text("privacy")
+    settings.static_dir = static
+    with TestClient(create_app(settings, conn=conn, start_pollers=False)) as c:
+        assert c.get("/").text == "public home"                  # signed out: what Tether is
+        assert c.get("/").headers["X-Tether-Page"] == "home"
+        assert c.get("/inbox").text == "app shell"               # deep links still reach the app's sign-in
+        assert c.get("/privacy.html").text == "privacy"
+        login(c, monkeypatch)
+        assert c.get("/").text == "app shell"                    # signed in: the app
+        assert c.get("/about").text == "public home"
