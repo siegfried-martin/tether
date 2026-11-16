@@ -74,7 +74,26 @@ export type AgendaEvent = {
   busy: 'busy' | 'tentative' | 'free' | 'oof'
   join_url: string | null
   description?: string | null
-  sources: { source_id: number; name: string; color: string }[]
+  sources: EventSource[]
+}
+
+export type EventSource = {
+  source_id: number
+  name: string
+  color: string
+  // Present on the web app's agenda: whether Tether can delete the event from this calendar.
+  deletable?: boolean
+  recurring?: boolean   // one occurrence of a repeating series
+  organizer?: boolean   // the calendar's owner organizes it (not just a guest)
+  guests?: number       // other people invited
+}
+
+export type DeleteResult = {
+  deleted: number
+  series: boolean
+  sources: string[]
+  remaining: string[]   // calendars Tether can't change, which keep their copy
+  undo: { source_id: number; event_id: string }[] | null
 }
 
 export type Hold = { source_id: number; source: string; events: { title: string; start: string; all_day: boolean }[] }

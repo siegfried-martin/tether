@@ -23,6 +23,7 @@ import re
 import secrets
 import sqlite3
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -193,11 +194,13 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
             if row is None:
                 conn.execute(
                     """INSERT INTO source_event (source_id, uid, instance_start, start, "end", all_day, title,
-                           location, description, modified_at, content_hash, busy)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           location, description, modified_at, content_hash, busy, external_id, series_id,
+                           organizer_self, guests)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (source_id, inst.uid, inst.instance_start, inst.start, inst.end, int(inst.all_day), inst.title,
-                     inst.location, inst.description, inst.modified_at, digest, inst.busy))
+                     inst.location, inst.description, inst.modified_at, digest, inst.busy, *_google_ids(inst)))
                 stats["added"] += 1
+                continue
             elif row["content_hash"] != digest or row["missing_since"] is not None:
                 conn.execute(
                     """UPDATE source_event SET start = ?, "end" = ?, all_day = ?, title = ?, location = ?,
@@ -210,6 +213,11 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
                     lag = (now - parse_iso(inst.modified_at)).total_seconds() / 60
                     if 0 <= lag < 24 * 60:
                         log.info("source %s: change seen %.0f min after it was made", source_id, lag)
+            ids = _google_ids(inst)
+            if tuple(row[c] for c in GOOGLE_ID_COLUMNS) != ids:
+                # Bookkeeping for deletes only: the hub content is unchanged, so not counted as a change.
+                conn.execute("UPDATE source_event SET external_id = ?, series_id = ?, organizer_self = ?, "
+                             "guests = ? WHERE id = ?", (*ids, row["id"]))
 
         absent = [r for k, r in existing.items() if k not in fetched]
         aged = [r for r in absent if window.starts_before(r["start"], bool(r["all_day"]))]
@@ -234,6 +242,13 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
             _delete_source_rows(conn, [r["id"] for r in future_absent])
             stats["removed"] = len(future_absent)
     return stats
+
+
+GOOGLE_ID_COLUMNS = ("external_id", "series_id", "organizer_self", "guests")
+
+
+def _google_ids(inst: Instance) -> tuple:
+    return inst.external_id, inst.series_id, int(inst.organizer_self), inst.guests
 
 
 def _delete_source_rows(conn: sqlite3.Connection, ids: list[int]) -> None:
@@ -485,11 +500,13 @@ async def write_hub(conn: sqlite3.Connection, api: gcal.CalendarApi | None, hub:
 # --------------------------------------------------------------------------
 
 
-def get_agenda(conn: sqlite3.Connection, start: date, end: date, tz: ZoneInfo, *, descriptions: bool = True) -> list[dict]:
+def get_agenda(conn: sqlite3.Connection, start: date, end: date, tz: ZoneInfo, *, descriptions: bool = True,
+               actions: bool = False, hub: Hub | None = None) -> list[dict]:
     """Hub events that start on days start..end inclusive (owner's zone), in start order.
 
     Each event lists its sources, and a join link when its description or
-    location carries a Teams, Meet or Zoom URL.
+    location carries a Teams, Meet or Zoom URL. With actions (the web app),
+    each source also says whether Tether can delete the event from it.
     """
     if end < start:
         raise CalendarError("end is before start")
@@ -505,9 +522,17 @@ def get_agenda(conn: sqlite3.Connection, start: date, end: date, tz: ZoneInfo, *
     ).fetchall()
     sources = defaultdict(list)
     for r in conn.execute(
-            """SELECT DISTINCT e.hub_event_id, s.id, s.name, a.color FROM source_event e
-               JOIN calendar_source s ON s.id = e.source_id JOIN account a ON a.id = s.account_id"""):
-        sources[r["hub_event_id"]].append({"source_id": r["id"], "name": r["name"], "color": r["color"]})
+            """SELECT e.hub_event_id, s.id, s.name, s.kind, s.access_role, s.external_ref, s.account_id,
+                      a.color, a.status AS account_status, MAX(e.external_id) AS external_id,
+                      MAX(e.series_id IS NOT NULL) AS recurring, MIN(e.organizer_self) AS organizer,
+                      MAX(e.guests) AS guests
+               FROM source_event e JOIN calendar_source s ON s.id = e.source_id JOIN account a ON a.id = s.account_id
+               GROUP BY e.hub_event_id, s.id ORDER BY s.id"""):
+        source = {"source_id": r["id"], "name": r["name"], "color": r["color"]}
+        if actions:
+            source.update(deletable=bool(r["external_id"]) and _writable(r, hub), recurring=bool(r["recurring"]),
+                          organizer=bool(r["organizer"]), guests=r["guests"])
+        sources[r["hub_event_id"]].append(source)
     out = []
     for h in rows:
         text = " ".join(filter(None, [h["location"], h["description"]]))
@@ -675,6 +700,92 @@ async def create_event(conn: sqlite3.Connection, api: gcal.CalendarApi, ev: NewE
         raise CalendarError(f"Google couldn't create the event (HTTP {code}).", status=502) from None
     return {"id": created.get("id"), "link": created.get("htmlLink"), "meet": created.get("hangoutLink"),
             "source_id": source["id"], "shown": bool(source["enabled"])}
+
+
+# --------------------------------------------------------------------------
+# Deleting events
+# --------------------------------------------------------------------------
+
+
+async def delete_event(conn: sqlite3.Connection, client: Callable[[int], gcal.CalendarApi], hub_event_id: int, *,
+                       series: bool, notify: bool, hub: Hub | None) -> dict:
+    """Delete an agenda event from every Google calendar of the owner's that holds it and Tether may
+    change. series deletes the whole repeating series, not just this occurrence. notify emails the
+    guests a cancellation (only for events the owner organizes). Copies on calendars Tether can't change
+    (an ICS feed, a shared read-only calendar) stay, and are named in "remaining".
+
+    The source events go at once, so the agenda drops the event without waiting for a fetch; the
+    next hub pass removes the hub copy. Returns "undo": what restore_events needs to bring it back,
+    or None when the deletes can't be cleanly undone (guests were emailed, or the owner was a guest).
+    """
+    rows = conn.execute(
+        """SELECT e.id, e.source_id, e.external_id, e.series_id, e.organizer_self, e.guests,
+                  s.name, s.kind, s.access_role, s.external_ref, s.account_id, a.status AS account_status
+           FROM source_event e JOIN calendar_source s ON s.id = e.source_id JOIN account a ON a.id = s.account_id
+           WHERE e.hub_event_id = ? ORDER BY e.source_id""", (hub_event_id,)).fetchall()
+    if not rows:
+        raise CalendarError("That event is no longer on the calendar.", status=404)
+    targets = [r for r in rows if r["external_id"] and _writable(r, hub)]
+    if not targets:
+        raise CalendarError("Tether can't delete this event: it's only on calendars Tether can't change.")
+    done: dict[tuple[int, str], sqlite3.Row] = {}
+    for r in targets:
+        event_id = r["series_id"] if series and r["series_id"] else r["external_id"]
+        if (r["source_id"], event_id) in done:
+            continue
+        emails = "all" if notify and r["organizer_self"] and r["guests"] else "none"
+        try:
+            await client(r["account_id"]).delete_event(r["external_ref"], event_id, send_updates=emails)
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            log.warning("calendar source %s: event delete failed: HTTP %s", r["source_id"], code)
+            _forget(conn, list(done.values()), series)
+            if code == 403:
+                raise CalendarError("Google refused. Reconnect this account in Settings so Tether may change "
+                                    "events, then try again.", status=403) from None
+            raise CalendarError(f"Google couldn't delete the event (HTTP {code}).", status=502) from None
+        done[(r["source_id"], event_id)] = r
+    _forget(conn, list(done.values()), series)
+    clean = all(r["organizer_self"] and not (notify and r["guests"]) for r in done.values())
+    deleted_from = {r["source_id"] for r in done.values()}
+    return {"deleted": len(done), "series": series,
+            "sources": sorted({r["name"] for r in done.values()}),
+            "remaining": sorted({r["name"] for r in rows if r["source_id"] not in deleted_from}),
+            "undo": [{"source_id": sid, "event_id": eid} for sid, eid in done] if clean else None}
+
+
+def _forget(conn: sqlite3.Connection, deleted: list[sqlite3.Row], series: bool) -> None:
+    """Drop the source events Google just deleted, then regroup so the agenda reflects it."""
+    if not deleted:
+        return
+    with tx(conn):
+        for r in deleted:
+            if series and r["series_id"]:
+                conn.execute("DELETE FROM source_event WHERE source_id = ? AND (series_id = ? OR id = ?)",
+                             (r["source_id"], r["series_id"], r["id"]))
+            else:
+                conn.execute("DELETE FROM source_event WHERE id = ?", (r["id"],))
+    assign_hub(conn)
+
+
+async def restore_events(conn: sqlite3.Connection, client: Callable[[int], gcal.CalendarApi], undo: list[dict],
+                         hub: Hub | None) -> list[int]:
+    """Undo delete_event: Google keeps a deleted event, cancelled, and setting it confirmed brings it
+    back. Returns the sources to fetch again."""
+    sources = {s["id"]: s for s in list_sources(conn)}
+    restored: list[int] = []
+    for u in undo:
+        source = sources.get(u.get("source_id"))
+        if source is None or not _writable(source, hub) or not u.get("event_id"):
+            raise CalendarError("Can't restore that event.")
+        try:
+            await client(source["account_id"]).restore_event(source["external_ref"], u["event_id"])
+        except httpx.HTTPStatusError as exc:
+            log.warning("calendar source %s: event restore failed: HTTP %s", source["id"], exc.response.status_code)
+            raise CalendarError(f"Google couldn't restore the event (HTTP {exc.response.status_code}).",
+                                status=502) from None
+        restored.append(source["id"])
+    return sorted(set(restored))
 
 
 def describe_error(exc: Exception) -> str:

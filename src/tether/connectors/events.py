@@ -29,6 +29,11 @@ class Instance:
     description: str | None = None
     modified_at: str | None = None
     busy: str = "busy"
+    # Google only, for deleting from the event panel (not part of the content hash):
+    external_id: str | None = None      # this instance's event ID
+    series_id: str | None = None        # the repeating series' event ID
+    organizer_self: bool = True         # the calendar's owner organizes it
+    guests: int = 0                     # other people invited
 
     @property
     def key(self) -> str:

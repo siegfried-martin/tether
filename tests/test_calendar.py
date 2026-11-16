@@ -116,6 +116,13 @@ def test_google_event_to_instance():
     assert gcal.to_instance(gevent("e", "2026-11-18", "2026-11-19", transparency="transparent"), TZ).busy == "free"
     invited = gevent("f", "2026-11-18T15:00:00Z", attendees=[{"self": True, "responseStatus": "needsAction"}])
     assert gcal.to_instance(invited, TZ).busy == "tentative"
+    assert (plain.external_id, plain.series_id, plain.organizer_self, plain.guests) == ("a", None, True, 0)
+    hosted = gcal.to_instance(gevent("g_20261118", "2026-11-18T15:00:00Z", recurringEventId="g",
+                                     organizer={"self": True}, attendees=[
+                                         {"self": True}, {"email": "b@x.com"}, {"email": "room@r", "resource": True}]),
+                              TZ)
+    assert (hosted.external_id, hosted.series_id, hosted.guests) == ("g_20261118", "g", 1)
+    assert gcal.to_instance(invited | {"organizer": {"email": "o@x.com"}}, TZ).organizer_self is False
 
 
 # --------------------------------------------------------------------------- fetch diff
@@ -333,7 +340,7 @@ class FakeCalendar:
         self.events[event_id] = dict(body)
         return True
 
-    async def delete_event(self, calendar_id, event_id):
+    async def delete_event(self, calendar_id, event_id, *, send_updates=None):
         self.calls.append(("delete", event_id))
         if event_id in self.events:
             self.events[event_id]["status"] = "cancelled"
@@ -570,3 +577,113 @@ def test_create_event_api(client, conn, monkeypatch):
     bad = client.post("/api/calendar/events", json={"source_id": source["id"], "start": "2026-11-16T09:30",
                                                     "end": "2026-11-16T09:00", "time_zone": "America/Chicago"})
     assert bad.status_code == 422 and "ends before" in bad.json()["detail"]
+
+
+class DeletingCalendar(FakeCalendar):
+    def __init__(self, status=200):
+        super().__init__()
+        self.status, self.deleted, self.restored = status, [], []
+
+    async def delete_event(self, calendar_id, event_id, *, send_updates=None):
+        if self.status != 200:
+            request = httpx.Request("DELETE", "https://x")
+            raise httpx.HTTPStatusError("no", request=request, response=httpx.Response(self.status, request=request))
+        self.deleted.append((calendar_id, event_id, send_updates))
+
+    async def restore_event(self, calendar_id, event_id):
+        self.restored.append((calendar_id, event_id))
+
+
+def agenda_event(conn, title):
+    return next(e for e in calendar.get_agenda(conn, TODAY, TODAY + timedelta(days=6), TZ, actions=True,
+                                               hub=calendar.Hub(1, "hub@group")) if e["title"] == title)
+
+
+async def test_delete_one_occurrence_or_the_series(conn, sources):
+    conn.execute("UPDATE account SET status = 'ok'")
+    weekly = [inst("s@google.com", f"2026-11-{d}T15:00:00Z", title="Standup", external_id=f"s_{d}", series_id="s")
+              for d in (16, 17, 18)]
+    apply(conn, sources["me"], weekly + [inst("x@google.com", "2026-11-16T18:00:00Z", title="Oops",
+                                              external_id="x")])
+    calendar.assign_hub(conn)
+    oops = agenda_event(conn, "Oops")
+    assert oops["sources"][0] == {"source_id": sources["me"], "name": "me@x.com", "color": "#111111",
+                                       "deletable": True, "recurring": False, "organizer": True, "guests": 0}
+    api = DeletingCalendar()
+    result = await calendar.delete_event(conn, lambda _: api, oops["id"], series=False, notify=True,
+                                         hub=sources["hub_config"])
+    assert api.deleted == [("me@x.com", "x", "none")]
+    assert result["undo"] == [{"source_id": sources["me"], "event_id": "x"}] and result["remaining"] == []
+    assert not any(e["title"] == "Oops" for e in calendar.get_agenda(conn, TODAY, TODAY + timedelta(days=6), TZ))
+
+    first = agenda_event(conn, "Standup")
+    assert first["sources"][0]["recurring"] is True
+    await calendar.delete_event(conn, lambda _: api, first["id"], series=False, notify=False, hub=sources["hub_config"])
+    assert api.deleted[-1][1] == "s_16" and count(conn, sources["me"]) == 2
+    await calendar.delete_event(conn, lambda _: api, agenda_event(conn, "Standup")["id"], series=True, notify=False,
+                                hub=sources["hub_config"])
+    assert api.deleted[-1][1] == "s" and count(conn, sources["me"]) == 0
+
+
+async def test_delete_emails_guests_only_when_asked_and_keeps_read_only_copies(conn, sources):
+    conn.execute("UPDATE account SET status = 'ok'")
+    apply(conn, sources["me"], [inst("m@google.com", "2026-11-16T18:00:00Z", title="Review", external_id="m",
+                                     guests=2)])
+    apply(conn, sources["work"], [inst("w@ics", "2026-11-16T18:00:00Z", title="Review")])
+    calendar.assign_hub(conn)
+    review = agenda_event(conn, "Review")
+    assert {s["source_id"]: s.get("deletable") for s in review["sources"]} == {sources["me"]: True,
+                                                                                sources["work"]: False}
+    api = DeletingCalendar()
+    result = await calendar.delete_event(conn, lambda _: api, review["id"], series=False, notify=True,
+                                         hub=sources["hub_config"])
+    assert api.deleted == [("me@x.com", "m", "all")]
+    assert result["undo"] is None and result["remaining"] == ["Work calendar"]
+    assert agenda_event(conn, "Review")["sources"][0]["source_id"] == sources["work"]
+    with pytest.raises(calendar.CalendarError):   # what's left is read-only
+        await calendar.delete_event(conn, lambda _: api, agenda_event(conn, "Review")["id"], series=False,
+                                    notify=False, hub=sources["hub_config"])
+
+
+async def test_delete_failure_keeps_the_event(conn, sources):
+    conn.execute("UPDATE account SET status = 'ok'")
+    apply(conn, sources["me"], [inst("x@google.com", "2026-11-16T18:00:00Z", title="Keep", external_id="x")])
+    calendar.assign_hub(conn)
+    with pytest.raises(calendar.CalendarError) as err:
+        await calendar.delete_event(conn, lambda _: DeletingCalendar(403), agenda_event(conn, "Keep")["id"],
+                                    series=False, notify=False, hub=sources["hub_config"])
+    assert err.value.status == 403 and count(conn, sources["me"]) == 1
+
+
+def test_fetch_fills_in_google_ids_without_counting_a_change(conn, sources):
+    apply(conn, sources["me"], [inst("x@google.com", "2026-11-16T18:00:00Z")])
+    stats = apply(conn, sources["me"], [inst("x@google.com", "2026-11-16T18:00:00Z", external_id="x")])
+    assert not any(stats.values())
+    assert conn.execute("SELECT external_id FROM source_event").fetchone()[0] == "x"
+
+
+def test_delete_and_restore_api(client, conn, monkeypatch):
+    login(client, monkeypatch)
+    acct = conn.execute("INSERT INTO account (kind, label, color, status) VALUES ('gmail', 'me@x.com', '#111111', 'ok')"
+                        ).lastrowid
+    calendar.sync_calendar_list(conn, acct, [{"id": "me@x.com", "summary": "Me", "primary": True,
+                                              "accessRole": "owner"}], None)
+    [source] = calendar.list_sources(conn)
+    apply(conn, source["id"], [inst("x@google.com", "2026-11-16T18:00:00Z", title="Oops", external_id="x")])
+    calendar.assign_hub(conn)
+    api = DeletingCalendar()
+    poller = client.app.state.calendar
+    monkeypatch.setattr(poller, "client", lambda account_id: api)
+    refreshed = []
+
+    async def refresh(source_id):
+        refreshed.append(source_id)
+    monkeypatch.setattr(poller, "refresh_source", refresh)
+    [event] = client.get("/api/agenda?start=2026-11-16&end=2026-11-16").json()
+    assert event["sources"][0]["deletable"] is True
+    resp = client.delete(f"/api/calendar/events/{event['id']}")
+    assert resp.status_code == 200 and api.deleted == [("me@x.com", "x", "none")]
+    assert client.get("/api/agenda?start=2026-11-16&end=2026-11-16").json() == []
+    assert client.delete(f"/api/calendar/events/{event['id']}").status_code == 404
+    resp = client.post("/api/calendar/events/restore", json={"undo": resp.json()["undo"]})
+    assert resp.status_code == 200 and api.restored == [("me@x.com", "x")] and refreshed == [source["id"]]

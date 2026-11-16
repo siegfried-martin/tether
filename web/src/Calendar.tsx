@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { patch, post, type AgendaEvent, type CalendarStatus, type Hold } from './api'
+import { del, patch, post, type AgendaEvent, type CalendarStatus, type DeleteResult, type Hold } from './api'
 import { DRAFT_ID, draftEvent, EventEditor, newDraft, type Draft } from './NewEvent'
 import { accountStyle, errorText, Linkified, SHORT_SCREEN, ToastView, useMedia, usePolling, useSwipe, useToast } from './shared'
 import { linkProps, navigate, type Location } from './route'
@@ -158,7 +158,26 @@ export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLEle
                       onCreate={(day, minutes) => setDraft(newDraft(day, minutes))}
                       onDay={(d) => go('day', d)} />}
       </div>
-      {picked && <EventDetail event={picked} onClose={() => setPicked(null)} />}
+      {picked && (
+        <EventDetail event={picked} onClose={() => setPicked(null)}
+                     onDeleted={(result) => {
+                       setPicked(null)
+                       agenda.reload()
+                       const what = `“${picked.title}”${result.series ? ' and its repeats' : ''}`
+                       const undo = result.undo
+                       setToast({
+                         text: result.remaining.length
+                           ? `Deleted ${what} from ${result.sources.join(', ')}. It's still on ${result.remaining.join(', ')}.`
+                           : `Deleted ${what}.`,
+                         undo: undo ? () => {
+                           setToast({ text: 'Restoring…' })
+                           post('/api/calendar/events/restore', { undo })
+                             .then(() => { agenda.reload(); setToast({ text: `Restored ${what}.` }) })
+                             .catch((err) => setToast({ text: `Couldn't restore it: ${errorText(err)}`, error: true }))
+                         } : undefined,
+                       })
+                     }} />
+      )}
       {draft && (
         <EventEditor draft={draft} update={(changes) => setDraft((d) => d && { ...d, ...changes })}
                      onClose={() => setDraft(null)}
@@ -489,12 +508,27 @@ function TimeGrid({ days: dayList, events, today, onPick, onDay, onCreate }: {
 
 // ------------------------------------------------------------------ detail
 
-function EventDetail({ event: e, onClose }: { event: AgendaEvent; onClose: () => void }) {
+function EventDetail({ event: e, onClose, onDeleted }: {
+  event: AgendaEvent; onClose: () => void; onDeleted: (result: DeleteResult) => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const deletable = e.sources.filter((s) => s.deletable)
+  const keys = useRef({ onClose, confirming, canDelete: deletable.length > 0 })
+  keys.current = { onClose, confirming, canDelete: deletable.length > 0 }
   useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => ev.key === 'Escape' && onClose()
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        if (keys.current.confirming) setConfirming(false)
+        else keys.current.onClose()
+      } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && keys.current.canDelete
+                 && !(ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement)) {
+        ev.preventDefault()
+        setConfirming(true)   // like Google: the Delete key asks first
+      }
+    }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
   const past = !e.all_day && new Date(e.end) < new Date()
   const when = e.all_day
     ? `${noon(e.start).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(e)}`
@@ -505,6 +539,11 @@ function EventDetail({ event: e, onClose }: { event: AgendaEvent; onClose: () =>
            onClick={(ev) => ev.stopPropagation()}>
         <div className="sheet-head">
           <h2 className="sheet-title">{e.title}</h2>
+          {deletable.length > 0 && !confirming && (
+            <button className="sheet-icon" onClick={() => setConfirming(true)} aria-label="Delete event" title="Delete event">
+              <TrashIcon />
+            </button>
+          )}
           <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
         </div>
         <p className="sheet-when">{when}</p>
@@ -514,6 +553,7 @@ function EventDetail({ event: e, onClose }: { event: AgendaEvent; onClose: () =>
           ))}
           {BUSY_LABEL[e.busy] && <span className="busy-tag">{BUSY_LABEL[e.busy]}</span>}
         </div>
+        {confirming && <DeleteConfirm event={e} onCancel={() => setConfirming(false)} onDeleted={onDeleted} />}
         {e.location && <p className="sheet-where"><Linkified text={e.location} /></p>}
         {e.join_url && !past && (
           <a className="button join" href={e.join_url} target="_blank" rel="noreferrer">Join meeting</a>
@@ -523,6 +563,68 @@ function EventDetail({ event: e, onClose }: { event: AgendaEvent; onClose: () =>
     </div>
   )
 }
+
+/** Asks before deleting, with Google's choices: this occurrence or the whole series, and whether to
+ *  email the guests. A guest's copy is only removed from the owner's calendar. */
+function DeleteConfirm({ event: e, onCancel, onDeleted }: {
+  event: AgendaEvent; onCancel: () => void; onDeleted: (result: DeleteResult) => void
+}) {
+  const targets = e.sources.filter((s) => s.deletable)
+  const others = e.sources.filter((s) => !s.deletable)
+  const recurring = targets.some((s) => s.recurring)
+  const hosting = targets.some((s) => s.organizer && (s.guests ?? 0) > 0)
+  const guestOnly = targets.every((s) => !s.organizer)
+  const [series, setSeries] = useState(false)
+  const [notify, setNotify] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const confirm = useRef<HTMLButtonElement>(null)
+  useEffect(() => { confirm.current?.focus() }, [])
+  const go = () => {
+    setBusy(true); setError(null)
+    del(`/api/calendar/events/${e.id}?series=${series}&notify=${hosting && notify}`)
+      .then((r) => onDeleted(r as DeleteResult))
+      .catch((err) => { setError(errorText(err)); setBusy(false) })
+  }
+  const verb = guestOnly ? 'Remove' : 'Delete'
+  return (
+    <div className="delete-confirm" role="group" aria-label={`${verb} event`}>
+      <strong>{guestOnly ? 'Remove this event from your calendar?' : recurring ? 'Delete repeating event' : 'Delete this event?'}</strong>
+      {recurring && (
+        <div className="delete-choices">
+          <label><input type="radio" name="scope" checked={!series} onChange={() => setSeries(false)} /> This event</label>
+          <label><input type="radio" name="scope" checked={series} onChange={() => setSeries(true)} /> All events in the series</label>
+        </div>
+      )}
+      {hosting && (
+        <label className="delete-notify">
+          <input type="checkbox" checked={notify} onChange={(ev) => setNotify(ev.target.checked)} />
+          Email guests a cancellation
+        </label>
+      )}
+      {guestOnly && <p className="muted">You're a guest, so this only takes it off {targets.map((s) => s.name).join(' and ')}.</p>}
+      {!guestOnly && targets.length > 1 && <p className="muted">It's deleted from {targets.map((s) => s.name).join(' and ')}.</p>}
+      {others.length > 0 && (
+        <p className="muted">It stays on {others.map((s) => s.name).join(' and ')}, which Tether can't change.</p>
+      )}
+      {error && <p className="error">{error}</p>}
+      <div className="delete-actions">
+        <button className="button secondary small" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button ref={confirm} className="button small danger" onClick={go} disabled={busy}>
+          {busy ? `${verb === 'Delete' ? 'Deleting' : 'Removing'}…` : verb}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" />
+    <path d="M6 7l1 13h10l1-13" /><path d="M9 7V4h6v3" />
+  </svg>
+)
 
 // ------------------------------------------------------------------ home card
 

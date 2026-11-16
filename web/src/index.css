@@ -475,6 +475,18 @@ button.link.danger { color: var(--urgent-text); }
 .sheet-head { display: flex; align-items: flex-start; gap: 12px; }
 .sheet-title { flex: 1; margin: 0; font-size: 1.2rem; text-transform: none; letter-spacing: 0; color: var(--text); overflow-wrap: anywhere; }
 .sheet-close { font-size: 1.6rem; line-height: 1; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 4px; }
+.sheet-icon {
+  background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px; display: grid; place-items: center;
+}
+.sheet-icon:hover, .sheet-icon:focus-visible { color: var(--urgent-text); background: var(--urgent-bg); }
+.delete-confirm {
+  display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--urgent-text);
+}
+.delete-confirm p { margin: 0; font-size: 0.9rem; }
+.delete-choices { display: grid; gap: 4px; }
+.delete-choices label, .delete-notify { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.delete-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.button.danger { background: var(--urgent-text); color: var(--bg); border-color: var(--urgent-text); }
 .sheet-when { margin: 0; font-weight: 500; }
 .sheet-where { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .sheet .button.join { justify-self: start; padding: 8px 16px; }

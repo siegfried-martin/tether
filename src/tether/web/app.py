@@ -19,7 +19,7 @@ from fastapi import Form
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from mcp.server.auth.provider import construct_redirect_uri
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from tether import db
@@ -81,6 +81,15 @@ class EventCreate(BaseModel):
     busy: str = "busy"
     repeat: str | None = None
     notify: bool = True
+
+
+class RestoreTarget(BaseModel):
+    source_id: int
+    event_id: str = Field(min_length=1, max_length=1024)
+
+
+class EventRestore(BaseModel):
+    undo: list[RestoreTarget] = Field(min_length=1, max_length=50)
 
 
 class TaskUpdate(BaseModel):
@@ -394,7 +403,7 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
                          conn: sqlite3.Connection = Depends(conn_dep)):
         with user_errors():
             first, last = calendar.parse_range(start, end, settings.today())
-            return calendar.get_agenda(conn, first, last, settings.tz)
+            return calendar.get_agenda(conn, first, last, settings.tz, actions=True, hub=hub(conn))
 
     @app.get("/api/calendar")
     async def get_calendar(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
@@ -432,6 +441,33 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         except Exception as exc:  # the event exists; the next cycle picks it up
             log.info("calendar source %s: refresh after create failed: %s", body.source_id, type(exc).__name__)
         return result
+
+    @app.delete("/api/calendar/events/{event_id}")
+    async def delete_event(event_id: int, request: Request, series: bool = False, notify: bool = False,
+                           _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        """event_id is the agenda event's id. Held under the poller's lock, so a fetch that started
+        before the delete can't put the event back."""
+        poller = request.app.state.calendar
+        async with poller.lock:
+            with user_errors():
+                result = await calendar.delete_event(conn, poller.client, event_id, series=series, notify=notify,
+                                                     hub=hub(conn))
+        poller.wake()   # write the hub: its copy goes too
+        return result
+
+    @app.post("/api/calendar/events/restore")
+    async def restore_events(body: EventRestore, request: Request, _: str = Depends(require_user),
+                             conn: sqlite3.Connection = Depends(conn_dep)):
+        poller = request.app.state.calendar
+        with user_errors():
+            sources = await calendar.restore_events(conn, poller.client, [u.model_dump() for u in body.undo],
+                                                    hub(conn))
+        for source_id in sources:
+            try:
+                await asyncio.wait_for(poller.refresh_source(source_id), timeout=15)
+            except Exception as exc:  # restored in Google; the next cycle picks it up
+                log.info("calendar source %s: refresh after restore failed: %s", source_id, type(exc).__name__)
+        return {"restored": len(body.undo)}
 
     @app.post("/api/calendar/sync")
     async def calendar_sync(request: Request, _: str = Depends(require_user)):

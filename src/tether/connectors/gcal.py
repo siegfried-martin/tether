@@ -23,8 +23,15 @@ class CalendarApi(Protocol):
     async def list_events(self, calendar_id: str, time_min: datetime, time_max: datetime) -> list[dict]: ...
     async def insert_event(self, calendar_id: str, body: dict) -> bool: ...
     async def update_event(self, calendar_id: str, event_id: str, body: dict) -> bool: ...
-    async def delete_event(self, calendar_id: str, event_id: str) -> None: ...
+    async def restore_event(self, calendar_id: str, event_id: str) -> None:
+        """Bring back an event deleted moments ago: Google keeps it, cancelled, until it is purged."""
+        resp = await self._request("PATCH", f"{self._cal(calendar_id)}/events/{quote(event_id, safe='')}",
+                                   params={"sendUpdates": "none"}, json={"status": "confirmed"})
+        resp.raise_for_status()
+
+    async def delete_event(self, calendar_id: str, event_id: str, *, send_updates: str | None = None) -> None: ...
     async def create_event(self, calendar_id: str, body: dict, *, conference: bool, send_updates: str) -> dict: ...
+    async def restore_event(self, calendar_id: str, event_id: str) -> None: ...
 
 
 class CalendarClient(GoogleClient):
@@ -86,9 +93,12 @@ class CalendarClient(GoogleClient):
         resp.raise_for_status()
         return resp.json()
 
-    async def delete_event(self, calendar_id: str, event_id: str) -> None:
-        """Delete; an event already gone counts as deleted."""
-        resp = await self._request("DELETE", f"{self._cal(calendar_id)}/events/{event_id}")
+    async def delete_event(self, calendar_id: str, event_id: str, *, send_updates: str | None = None) -> None:
+        """Delete; an event already gone counts as deleted. send_updates ("all" or "none") decides whether
+        guests are emailed a cancellation; left out, Google's default (none) applies."""
+        params = {"sendUpdates": send_updates} if send_updates else None
+        resp = await self._request("DELETE", f"{self._cal(calendar_id)}/events/{quote(event_id, safe='')}",
+                                   params=params)
         if resp.status_code not in (404, 410):
             resp.raise_for_status()
 
@@ -126,6 +136,10 @@ def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
         description=description,
         modified_at=iso(parse_iso(event["updated"])) if event.get("updated") else None,
         busy=busy,
+        external_id=event.get("id"),
+        series_id=event.get("recurringEventId"),
+        organizer_self="organizer" not in event or bool(event["organizer"].get("self")),   # Google omits false
+        guests=sum(1 for a in event.get("attendees", []) if not a.get("self") and not a.get("resource")),
     )
 
 

@@ -137,6 +137,11 @@ class CalendarPoller:
         return gcal.CalendarClient(self.http, self.conn, self.vault, account_id,
                                    self.settings.google_client_id, self.settings.google_client_secret)
 
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Held by each cycle; hold it to change source events without a fetch landing in between."""
+        return self._lock
+
     async def refresh_source(self, source_id: int) -> None:
         """Fetch one source now (after Tether added an event to it) so the agenda shows the change
         at once. The hub write follows in the next cycle."""
