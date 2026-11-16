@@ -13,6 +13,22 @@ export function relativeTime(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** Whether a CSS media query matches, kept current as the screen turns or resizes. */
+export function useMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches)
+  useEffect(() => {
+    const list = matchMedia(query)
+    const update = () => setMatches(list.matches)
+    update()
+    list.addEventListener('change', update)
+    return () => list.removeEventListener('change', update)
+  }, [query])
+  return matches
+}
+
+/** Short screens (a phone on its side) get the compact calendar: its toolbar joins the header row. */
+export const SHORT_SCREEN = '(max-height: 500px)'
+
 export function usePolling<T>(path: string): { data: T | null; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)

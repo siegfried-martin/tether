@@ -13,6 +13,7 @@ export default function App() {
   const [me, setMe] = useState<string | null | undefined>(undefined)
   const loc = useLocation()
   const page = pageOf(loc.path)
+  const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null)   // where a page can put controls in the header
 
   useEffect(() => {
     get<{ email: string }>('/api/me')
@@ -31,6 +32,7 @@ export default function App() {
         <a className="brand" {...linkProps('/inbox')}>
           <img src="/icon.svg" alt="" width="28" height="28" /><span className="brand-name">Tether</span>
         </a>
+        <div className="bar-slot" ref={setBarSlot} />
         <nav>
           {NAV.map(([to, label]) => (
             <a key={to} className={page === to ? 'active' : ''} {...linkProps(`/${to}`)}>{label}</a>
@@ -40,7 +42,7 @@ export default function App() {
       <InstallBanner />
       {page === 'settings' ? <Settings onSignedOut={() => setMe(null)} />
         : page === 'tasks' ? <TasksPage loc={loc} />
-        : page === 'calendar' ? <CalendarPage loc={loc} />
+        : page === 'calendar' ? <CalendarPage loc={loc} barSlot={barSlot} />
         : page === 'inbox' ? <Home loc={loc} /> : null}
     </div>
   )

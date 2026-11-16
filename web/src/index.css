@@ -365,7 +365,7 @@ button.link.danger { color: var(--urgent-text); }
 /* Calendar time grid */
 .cal-grid {
   --gutter: 52px;
-  height: calc(100dvh - 57px - 58px - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   border-top: 1px solid var(--border); margin: 0 -16px; position: relative;
 }
 @media (min-width: 900px) { .cal-grid { margin: 0; border: 1px solid var(--border); border-radius: 8px; } }
@@ -480,4 +480,40 @@ main.calendar-page { overflow-x: clip; }
 .install-close {
   flex: none; width: 36px; height: 36px; border: 0; background: none; color: var(--muted);
   font-size: 1.4rem; line-height: 1; cursor: pointer; border-radius: 6px;
+}
+
+/* The time grid takes whatever height the header and toolbar leave. (Schedule scrolls the page.) */
+.app:has(> main.calendar-page:not(.view-schedule)) { height: 100dvh; display: flex; flex-direction: column; }
+main.calendar-page:not(.view-schedule) { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 8px; }
+main.calendar-page:not(.view-schedule) .cal-swipe { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.bar-slot { flex: 1; min-width: 0; display: flex; }
+.app { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+
+/* Phones: slimmer day headings */
+@media (max-width: 520px), (max-height: 500px) {
+  .cal-day-head { padding: 3px 0 4px; gap: 0; }
+  .cal-day-head .dom { font-size: 1.05rem; width: 1.9em; height: 1.9em; line-height: 1.9em; }
+}
+
+/* Short screens (a phone on its side): one header row holding the calendar controls,
+   day headings on one line, and a single all-day row before "+N more". */
+@media (max-height: 500px) {
+  .bar { padding: 4px 12px; gap: 10px; }
+  .brand-name { display: none; }
+  .brand img { width: 26px; height: 26px; }
+  nav a { padding: 4px 6px; font-size: 0.92rem; }
+  .bar-slot .cal-toolbar { position: static; padding: 0; gap: 4px; flex-wrap: nowrap; background: none; flex: 1; min-width: 0; }
+  .bar-slot .cal-title { font-size: 1rem; margin: 0 4px; }
+  .bar-slot .cal-title .long { display: none; }
+  .bar-slot .cal-title .short { display: inline; }
+  .bar-slot .segmented { display: none; }
+  .bar-slot .view-select { display: block; padding: 4px; font-size: 0.88rem; }
+  .bar-slot .button.small { padding: 4px 10px; }
+  .bar-slot .pager-button { width: 28px; height: 28px; }
+  main.calendar-page.short-screen { padding-top: 0; padding-bottom: 0; }
+  .cal-day-head { flex-direction: row; justify-content: center; align-items: center; gap: 6px; padding: 2px 0; }
+  .cal-day-head .dom { font-size: 0.95rem; width: 1.8em; height: 1.8em; line-height: 1.8em; }
+  .cal-banners { padding: 2px 0 3px; }
+  .cal-banners.expanded { max-height: 45vh; }
+  .install-strip { display: none; }
 }

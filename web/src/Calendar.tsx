@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { patch, post, type AgendaEvent, type CalendarStatus, type Hold } from './api'
-import { accountStyle, errorText, Linkified, usePolling } from './shared'
+import { accountStyle, errorText, Linkified, SHORT_SCREEN, useMedia, usePolling } from './shared'
 import { linkProps, navigate, type Location } from './route'
 
 // ------------------------------------------------------------------ dates
@@ -98,7 +99,7 @@ function title(view: View, first: string, last: string): string {
   return `${a.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })} – ${b.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`
 }
 
-export function CalendarPage({ loc }: { loc: Location }) {
+export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLElement | null }) {
   const segment = loc.path.split('/')[2]
   const view = VIEWS.find((v) => v.id === segment)?.id
   const today = isoDay(new Date())
@@ -106,6 +107,7 @@ export function CalendarPage({ loc }: { loc: Location }) {
   const [picked, setPicked] = useState<AgendaEvent | null>(null)
   const swipeTo = useRef<(dir: 1 | -1) => void>(() => {})
   const swiper = useSwipe(swipeTo)
+  const short = useMedia(SHORT_SCREEN)
 
   useEffect(() => { if (!view) navigate(`/calendar/${savedView()}${location.search}`, { replace: true }) }, [view])
   useEffect(() => {
@@ -121,8 +123,7 @@ export function CalendarPage({ loc }: { loc: Location }) {
   const step = VIEWS.find((v) => v.id === view)!.step
   swipeTo.current = (dir) => go(view, plusDays(anchor, dir * step))
 
-  return (
-    <main className={`calendar-page view-${view}`}>
+  const toolbar = (
       <div className="cal-toolbar">
         <button className="button secondary small" onClick={() => go(view, today)}>Today</button>
         <button className="pager-button" aria-label="Previous" onClick={() => go(view, plusDays(anchor, -step))}>‹</button>
@@ -139,6 +140,11 @@ export function CalendarPage({ loc }: { loc: Location }) {
           {VIEWS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
         </select>
       </div>
+  )
+
+  return (
+    <main className={`calendar-page view-${view}${short ? ' short-screen' : ''}`}>
+      {short && barSlot ? createPortal(toolbar, barSlot) : toolbar}
       {agenda.error && <p className="error">Couldn't load the calendar: {agenda.error}</p>}
       <div className="cal-swipe" ref={swiper}>
         {view === 'schedule'
@@ -333,20 +339,20 @@ function bannerLanes(banners: Banner[]): (Banner & { lane: number })[] {
   })
 }
 
-const COLLAPSED_LANES = 2
 
 /**
- * The all-day strip. Collapsed, it shows two rows and then a "+N more" for each day
+ * The all-day strip. Collapsed, it shows two rows (one on a short screen) and then a "+N more" for each day
  * with more than that; a tap on the strip (outside an event) or on the arrow opens every row.
  */
 function AllDay({ banners, dayCount, expanded, onToggle, onPick }: {
   banners: Banner[]; dayCount: number; expanded: boolean; onToggle: () => void; onPick: (e: AgendaEvent) => void
 }) {
   const placed = bannerLanes(banners)
+  const collapsedLanes = useMedia(SHORT_SCREEN) ? 1 : 2
   const lanes = Math.max(...placed.map((b) => b.lane)) + 1
   // A third row is cheaper than a "+N more" row standing in for it.
-  const collapsible = lanes > COLLAPSED_LANES + 1
-  const shown = !collapsible || expanded ? lanes : COLLAPSED_LANES
+  const collapsible = lanes > collapsedLanes + 1
+  const shown = !collapsible || expanded ? lanes : collapsedLanes
   const hidden = Array.from({ length: dayCount }, (_, day) =>
     placed.filter((b) => b.lane >= shown && b.span[0] <= day && day < b.span[1]).length)
   return (
