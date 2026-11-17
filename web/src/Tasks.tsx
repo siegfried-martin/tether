@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { del, patch, post, type Tag, type TagRef, type Task, type TaskPage } from './api'
-import { accountStyle, addDays, ColorPicker, DueLabel, errorText, localToday, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast, type Toast } from './shared'
+import { accountStyle, addDays, ColorPicker, DueLabel, errorText, localToday, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, useMedia, usePolling, useToast, type Toast } from './shared'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
 import { navigate, withParams, type Location } from './route'
 
 type Done = Task & { warnings: string[]; archived_items: number[] }
+type Drop = { id: number; where: 'before' | 'after' }
+
+/** Drag to reorder needs a mouse or trackpad and room for the handle: not on phones. */
+const CAN_DRAG = '(min-width: 481px) and (pointer: fine)'
 
 export function TasksPage({ loc }: { loc: Location }) {
   const page = pageParam(loc.params)
@@ -18,6 +22,11 @@ export function TasksPage({ loc }: { loc: Location }) {
   // Checked at once, before the server answers.
   const [flipped, setFlipped] = useState<Set<number>>(new Set())
   const [toast, setToast] = useToast()
+  const canDrag = useMedia(CAN_DRAG)
+  // A move shows at once; the next answer from the server replaces it.
+  const [moved, setMoved] = useState<{ base: TaskPage; rows: Task[] } | null>(null)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const [drop, setDrop] = useState<Drop | null>(null)
 
   const refresh = () => { list.reload(); tags.reload() }
   const fail = (e: unknown) => setToast({ text: errorText(e), error: true })
@@ -45,8 +54,61 @@ export function TasksPage({ loc }: { loc: Location }) {
     try { await post(`/api/tasks/${task.id}/reopen`) } catch (e) { fail(e) } finally { flip(task.id, false); refresh() }
   }
 
-  const rows = list.data?.tasks
+  const rows = moved && moved.base === list.data ? moved.rows : list.data?.tasks
   const firstDone = rows?.findIndex((t) => t.status === 'done') ?? -1
+
+  const move = (task: Task, to: Drop) => {
+    if (!rows || !list.data) return
+    const next = reorder(rows, task, to)
+    if (next.every((t, n) => t.id === rows[n].id)) return
+    setMoved({ base: list.data, rows: next })
+    post(`/api/tasks/${task.id}/move`, to.where === 'before' ? { before: to.id } : { after: to.id })
+      .catch(fail).finally(refresh)
+  }
+
+  /** The task a drag over this row would drop next to, and on which side. */
+  const dropAt = (e: React.DragEvent): Drop | null => {
+    const dragged = rows?.find((t) => t.id === dragging)
+    const li = (e.target as Element).closest<HTMLElement>('li[data-task]')
+    const over = rows?.find((t) => t.id === Number(li?.dataset.task))
+    if (!dragged || !over || !rows) return null
+    // A task moves past whole tasks, subtasks and all; a subtask moves among its siblings.
+    const target = dragged.parent_id === null && over.parent_id !== null
+      ? rows.find((t) => t.id === over.parent_id) : over
+    if (!target || target.id === dragged.id || target.status !== 'open' || target.parent_id !== dragged.parent_id) return null
+    const block = [...document.querySelectorAll<HTMLElement>(
+      target.parent_id === null ? `li[data-block="${target.id}"]` : `li[data-task="${target.id}"]`)]
+    const top = block[0].getBoundingClientRect().top
+    const bottom = block[block.length - 1].getBoundingClientRect().bottom
+    return { id: target.id, where: e.clientY < (top + bottom) / 2 ? 'before' : 'after' }
+  }
+  const dragProps = canDrag && dragging !== null ? {
+    onDragOver: (e: React.DragEvent) => {
+      const at = dropAt(e)
+      if (at) e.preventDefault()
+      if (at?.id !== drop?.id || at?.where !== drop?.where) setDrop(at)
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      const task = rows?.find((t) => t.id === dragging)
+      const at = dropAt(e)
+      if (task && at) move(task, at)
+      setDrop(null)
+    },
+  } : {}
+  // With keys: up and down past the neighboring task (or subtask).
+  const nudge = (task: Task, step: -1 | 1) => {
+    const siblings = rows?.filter((t) => t.status === 'open' && t.parent_id === task.parent_id) ?? []
+    const other = siblings[siblings.findIndex((t) => t.id === task.id) + step]
+    if (other) move(task, { id: other.id, where: step < 0 ? 'before' : 'after' })
+  }
+  const blockEnd = (id: number) => {
+    const inBlock = rows?.filter((t) => t.id === id || t.parent_id === id) ?? []
+    return inBlock[inBlock.length - 1]?.id
+  }
 
   return (
     <main className="tasks-page">
@@ -58,9 +120,18 @@ export function TasksPage({ loc }: { loc: Location }) {
         <p className="muted">{filter ? `No open tasks tagged ${filter.name}.`
           : 'No open tasks. Make one from an email in the inbox, or above.'}</p>
       )}
-      <ul className="tasks">
+      <ul className={`tasks${dragging !== null ? ' sorting' : ''}`} {...dragProps}>
         {rows?.map((t, n) => (
           <TaskRow key={t.id} task={t} first={n === firstDone} editing={editing === t.id} reading={reading === t.id}
+                   block={t.parent_id !== null && rows.some((p) => p.id === t.parent_id && p.status === 'open') ? t.parent_id : t.id}
+                   drag={canDrag ? {
+                     dragging: dragging !== null && (t.id === dragging || t.parent_id === dragging),
+                     drop: drop?.where === 'before' && drop.id === t.id ? 'before'
+                       : drop?.where === 'after' && blockEnd(drop.id) === t.id ? 'after' : null,
+                     onStart: () => setDragging(t.id),
+                     onEnd: () => { setDragging(null); setDrop(null) },
+                     onNudge: (step) => nudge(t, step),
+                   } : null}
                    checked={(t.status === 'done') !== flipped.has(t.id)}
                    onToggleEdit={() => setEditing(editing === t.id ? null : t.id)}
                    onToggleRead={() => setReading(reading === t.id ? null : t.id)}
@@ -102,16 +173,53 @@ function AddTask({ parentId, onAdded, onError, placeholder, tags = [] }: {
   )
 }
 
-function TaskRow({ task, first, editing, reading, checked, onToggleEdit, onToggleRead, onCheck, onChanged, onError, allTags, onTag }: {
-  task: Task; first: boolean; editing: boolean; reading: boolean; checked: boolean
+/** rows with task moved just before or after the task to.id, a task taking its subtasks along. */
+function reorder(rows: Task[], task: Task, to: Drop): Task[] {
+  const inBlock = (t: Task, id: number) => t.id === id || (task.parent_id === null && t.parent_id === id)
+  const block = rows.filter((t) => inBlock(t, task.id))
+  const rest = rows.filter((t) => !inBlock(t, task.id))
+  const targets = rest.map((t, n) => (inBlock(t, to.id) ? n : -1)).filter((n) => n >= 0)
+  const at = to.where === 'before' ? targets[0] : targets[targets.length - 1] + 1
+  return [...rest.slice(0, at), ...block, ...rest.slice(at)]
+}
+
+type DragRow = {
+  dragging: boolean; drop: 'before' | 'after' | null
+  onStart: () => void; onEnd: () => void; onNudge: (step: -1 | 1) => void
+}
+
+function TaskRow({ task, first, block, drag, editing, reading, checked, onToggleEdit, onToggleRead, onCheck, onChanged, onError, allTags, onTag }: {
+  task: Task; first: boolean; block: number; drag: DragRow | null; editing: boolean; reading: boolean; checked: boolean
   onToggleEdit: () => void; onToggleRead: () => void; onCheck: () => void
   onChanged: () => void; onError: (e: unknown) => void; allTags: Tag[]; onTag: (id: number) => void
 }) {
   const done = task.status === 'done'
+  const row = useRef<HTMLLIElement>(null)
+  const classes = ['task-row', task.parent_id && 'subtask', editing && 'editing', done && 'done', first && 'first-done',
+                   drag?.dragging && 'dragging', drag?.drop && `drop-${drag.drop}`]
   return (
-    <li className={`task-row${task.parent_id ? ' subtask' : ''}${editing ? ' editing' : ''}${done ? ' done' : ''}${first ? ' first-done' : ''}`}>
+    <li ref={row} className={classes.filter(Boolean).join(' ')} data-task={task.id} data-block={block}>
       {first && <h2 className="done-head">Completed</h2>}
       <div className="task-line">
+        {drag && (done ? <span className="drag-handle" aria-hidden /> : (
+          // A span, not a button: Firefox won't start a drag from a button.
+          <span role="button" tabIndex={0} className="drag-handle" draggable title="Drag to reorder (or focus and use ↑ ↓)"
+                  aria-label={`Reorder ${task.title}: use the up and down arrow keys`}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', task.title)
+                    if (row.current) e.dataTransfer.setDragImage(row.current, 12, 20)
+                    drag.onStart()
+                  }}
+                  onDragEnd={drag.onEnd}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                    e.preventDefault()
+                    drag.onNudge(e.key === 'ArrowUp' ? -1 : 1)
+                  }}>
+            <GripIcon />
+          </span>
+        ))}
         <input type="checkbox" className="check" checked={checked} onChange={onCheck}
                aria-label={`${done ? 'Reopen' : 'Complete'}: ${task.title}`} />
         <button className="task-title" onClick={onToggleEdit} aria-expanded={editing} disabled={done}>{task.title}</button>
@@ -203,6 +311,14 @@ function TaskEditor({ task, allTags, onChanged, onError }: {
         <button className="link danger" onClick={remove}>Delete task</button>
       </div>
     </div>
+  )
+}
+
+function GripIcon() {
+  return (
+    <svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true" fill="currentColor">
+      {[2, 8, 14].flatMap((y) => [2, 8].map((x) => <circle key={`${x}${y}`} cx={x} cy={y} r="1.5" />))}
+    </svg>
   )
 }
 

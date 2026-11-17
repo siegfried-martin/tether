@@ -114,6 +114,12 @@ class TaskUpdate(BaseModel):
     tags: list[str] | None = None   # replaces the task's tags; new names become new tags
 
 
+class TaskMove(BaseModel):
+    """Exactly one: the open sibling to put the task just before, or just after."""
+    before: int | None = None
+    after: int | None = None
+
+
 USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError)
 
 
@@ -398,6 +404,12 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
                           conn: sqlite3.Connection = Depends(conn_dep)):
         with user_errors():
             return tasks.update_task(conn, task_id, body.model_dump(exclude_unset=True))
+
+    @app.post("/api/tasks/{task_id}/move")
+    async def move_task(task_id: int, body: TaskMove, _: str = Depends(require_user),
+                        conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.move_task(conn, task_id, before=body.before, after=body.after)
 
     @app.post("/api/tasks/{task_id}/complete")
     async def complete_task(task_id: int, request: Request, _: str = Depends(require_user)):

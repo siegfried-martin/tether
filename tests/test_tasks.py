@@ -57,15 +57,47 @@ async def test_task_page_order_and_paging(conn, fake_gmail, gmail):
     tasks.create_task(conn, title="A1", parent_id=a["id"])
     c = tasks.create_task(conn, title="C")
     d = tasks.create_task(conn, title="D")
-    conn.execute("UPDATE task SET sort_order = -1 WHERE id = ?", (d["id"],))  # page order ignores manual order
     for task, at in ((b, "2026-11-15T09:00:00Z"), (c, "2026-11-15T11:00:00Z")):
         await tasks.complete_task(conn, gmail, task["id"])
         conn.execute("UPDATE task SET completed_at = ? WHERE id = ?", (at, task["id"]))
     page = tasks.task_page(conn)
-    assert [t["title"] for t in page["tasks"]] == ["A", "A1", "D", "C", "B"], "open oldest first, then newest done"
+    assert [t["title"] for t in page["tasks"]] == ["A", "A1", "D", "C", "B"], "open in order, then newest done"
     assert page["total"] == 4 and page["open"] == 3
     second = tasks.task_page(conn, offset=1, limit=2)
     assert [t["title"] for t in second["tasks"]] == ["D", "C"], "a page counts a task with its subtasks as one"
+
+
+def test_move_task(conn):
+    a, b, c = (tasks.create_task(conn, title=t) for t in "ABC")
+    a1, a2, a3 = (tasks.create_task(conn, title=t, parent_id=a["id"]) for t in ("A1", "A2", "A3"))
+    titles = lambda: [t["title"] for t in tasks.task_page(conn)["tasks"]]  # noqa: E731
+    tasks.move_task(conn, c["id"], before=a["id"])
+    assert titles() == ["C", "A", "A1", "A2", "A3", "B"]
+    tasks.move_task(conn, c["id"], after=b["id"])
+    assert titles() == ["A", "A1", "A2", "A3", "B", "C"]
+    tasks.move_task(conn, a["id"], after=b["id"])
+    assert titles() == ["B", "A", "A1", "A2", "A3", "C"], "a task moves with its subtasks"
+    tasks.move_task(conn, a3["id"], before=a1["id"])
+    tasks.move_task(conn, a1["id"], after=a2["id"])
+    assert titles() == ["B", "A", "A3", "A2", "A1", "C"]
+    assert tasks.create_task(conn, title="D")["sort_order"] > c["sort_order"], "new tasks go last"
+    assert titles()[-1] == "D"
+    with pytest.raises(tasks.TaskError, match="same parent"):
+        tasks.move_task(conn, a1["id"], before=b["id"])
+    with pytest.raises(tasks.TaskError, match="before or after"):
+        tasks.move_task(conn, a1["id"])
+    with pytest.raises(tasks.TaskError, match="itself"):
+        tasks.move_task(conn, b["id"], after=b["id"])
+
+
+async def test_move_ignores_done_and_reopen_keeps_place(conn, gmail):
+    a, b, c = (tasks.create_task(conn, title=t) for t in "ABC")
+    await tasks.complete_task(conn, gmail, b["id"])
+    with pytest.raises(tasks.TaskError, match="open"):
+        tasks.move_task(conn, b["id"], before=a["id"])
+    tasks.move_task(conn, c["id"], before=a["id"])
+    tasks.reopen_task(conn, b["id"])
+    assert [t["title"] for t in tasks.task_page(conn)["tasks"]] == ["C", "A", "B"]
 
 
 def test_field_validation(conn):
@@ -156,6 +188,10 @@ def test_tasks_api(client, conn, fake_gmail, monkeypatch, acct):
     assert done["status"] == "done" and done["archived_items"] == [item_id]
     assert [t["id"] for t in client.get("/api/tasks?status=done").json()] == [task["id"]]
     assert client.post(f"/api/tasks/{task['id']}/reopen").json()["status"] == "open"
+    other = client.post("/api/tasks", json={"title": "Other"}).json()
+    assert client.post(f"/api/tasks/{other['id']}/move", json={"before": task["id"]}).status_code == 200
+    assert [t["id"] for t in client.get("/api/tasks/page").json()["tasks"]] == [other["id"], task["id"]]
+    assert client.post(f"/api/tasks/{other['id']}/move", json={}).status_code == 422
     assert client.delete(f"/api/tasks/{task['id']}").status_code == 204
     assert client.delete(f"/api/tasks/{task['id']}").status_code == 404
 

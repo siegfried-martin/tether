@@ -87,14 +87,14 @@ def list_tasks(conn: sqlite3.Connection, *, status: str | None = "open", parent_
 
 
 def task_page(conn: sqlite3.Connection, *, offset: int = 0, limit: int = 50, tag_id: int | None = None) -> dict:
-    """Every task, for the Tasks page: open tasks oldest first, each followed by its open
-    subtasks, then completed tasks most recently completed first.
+    """Every task, for the Tasks page: open tasks in the owner's order (sort_order; new ones
+    go last), each followed by its open subtasks, then completed tasks most recently completed first.
 
     Paging counts groups (a task with its subtasks), so a page never splits one.
     With tag_id, an open group is shown whole when the task or any of its open
     subtasks has the tag; a completed task shows when it has the tag itself.
     """
-    rows = _with_tags(conn, [dict(r) for r in conn.execute(f"{VIEW_SQL} ORDER BY t.created_at, t.id").fetchall()])
+    rows = _with_tags(conn, [dict(r) for r in conn.execute(f"{VIEW_SQL} ORDER BY t.sort_order, t.id").fetchall()])
     open_rows = [r for r in rows if r["status"] == "open"]
     open_ids = {r["id"] for r in open_rows}
     children: dict[int, list[dict]] = {}
@@ -199,6 +199,33 @@ def update_task(conn: sqlite3.Connection, task_id: int, fields: dict) -> dict:
             changes["updated_at"] = utcnow()
             assignments = ", ".join(f"{k} = ?" for k in changes)
             conn.execute(f"UPDATE task SET {assignments} WHERE id = ?", [*changes.values(), task_id])
+    return get_task(conn, task_id)
+
+
+def move_task(conn: sqlite3.Connection, task_id: int, *, before: int | None = None,
+              after: int | None = None) -> dict:
+    """Put an open task just before or just after another open task with the same parent
+    (a subtask moves among its siblings; a task moves with its subtasks). The open siblings
+    are renumbered 1..n, which keeps the order exact however many moves are made."""
+    if (before is None) == (after is None):
+        raise TaskError("say which task to move it before or after")
+    target_id = before if before is not None else after
+    task, target = get_task(conn, task_id), get_task(conn, target_id)
+    if task_id == target_id:
+        raise TaskError("a task can't move next to itself")
+    if task["status"] != "open" or target["status"] != "open":
+        raise TaskError("only open tasks can be reordered")
+    if task["parent_id"] != target["parent_id"]:
+        raise TaskError("a task can only move among tasks with the same parent")
+    with tx(conn):
+        siblings = [r[0] for r in conn.execute(
+            "SELECT id FROM task WHERE parent_id IS ? AND status = 'open' AND id != ? ORDER BY sort_order, id",
+            (task["parent_id"], task_id))]
+        at = siblings.index(target_id) + (after is not None)
+        siblings.insert(at, task_id)
+        conn.executemany("UPDATE task SET sort_order = ? WHERE id = ?",
+                         [(n, sid) for n, sid in enumerate(siblings, 1)])
+        conn.execute("UPDATE task SET updated_at = ? WHERE id = ?", (utcnow(), task_id))
     return get_task(conn, task_id)
 
 

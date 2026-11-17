@@ -87,3 +87,19 @@ def test_palette_migration_and_work_color(tmp_path):
         ["#4377f0", "#123456", "#ee9e10", "#ee9e10"]
     assert accounts.next_color(c, "digest") == "#ee9e10"
     assert accounts.next_color(c, "gmail") == accounts.PALETTE[4]
+
+
+def test_manual_order_migration_keeps_creation_order(tmp_path):
+    """0012 renumbers sort_order per parent in creation order, so the Tasks page looks the same."""
+    from tether import db as dbmod
+    c = sqlite3.connect(tmp_path / "o.db", isolation_level=None)
+    for version, sql in dbmod._migrations():
+        if version < 12:
+            dbmod._apply(c, version, sql)
+    ins = ("INSERT INTO task (id, parent_id, title, sort_order, created_at, updated_at) "
+           "VALUES (?, ?, 't', ?, ?, '2026-11-01')")
+    c.executemany(ins, [(1, None, 7, "2026-11-03"), (2, None, 7, "2026-11-01"), (3, None, 1, "2026-11-02"),
+                        (4, 1, 9, "2026-11-04"), (5, 1, 2, "2026-11-05")])
+    c.close()
+    c = dbmod.connect(tmp_path / "o.db")
+    assert dict(c.execute("SELECT id, sort_order FROM task")) == {2: 1, 3: 2, 1: 3, 4: 1, 5: 2}
