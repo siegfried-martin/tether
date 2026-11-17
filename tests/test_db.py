@@ -8,7 +8,7 @@ from tether.db import utcnow
 def test_schema_tables(conn):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert names == {"account", "credential", "item", "task", "follow_up", "calendar_source",
-                     "source_event", "hub_event", "sync_state", "oauth_client", "oauth_grant", "oauth_token"}
+                     "source_event", "hub_event", "sync_state", "oauth_client", "oauth_grant", "oauth_token", "tag", "task_tag"}
 
 
 def latest() -> int:

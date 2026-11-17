@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, patch, post, type Account, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
-import { accountStyle, DueLabel, PALETTE, useSwipe, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
+import { accountStyle, ColorPicker, DueLabel, useSwipe, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
 import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
-import { TasksPage } from './Tasks'
+import { TagSettings, TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
 import { InstallBanner } from './Install'
 import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location, type Page } from './route'
@@ -336,6 +336,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
         <a className="button" href="/accounts/google/connect">Connect a Google account</a>
       </section>
       <CalendarSettings />
+      <TagSettings />
       <DigestPanel onIngested={accounts.reload} />
       <section>
         <h2>Sync</h2>
@@ -425,7 +426,8 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
   return (
     <li className="account">
       <div className="account-head">
-        <ColorPicker account={account} onSaved={onSaved} />
+        <ColorPicker value={account.color} label={`Color for ${account.label}`}
+                     save={(color) => patch(`/api/accounts/${account.id}`, { color }).then(onSaved)} />
         <span className="grow">{account.label}</span>
         <span className={`status ${account.status}`}>
           {account.kind === 'digest' ? 'digest' : account.kind === 'ics' ? 'calendar feed'
@@ -441,55 +443,6 @@ function AccountRow({ account, onSaved }: { account: Account; onSaved: () => voi
         <SyncPanel accountId={account.id} sync={account.sync} onSaved={onSaved} />
       )}
     </li>
-  )
-}
-
-function ColorPicker({ account, onSaved }: { account: Account; onSaved: () => void }) {
-  const [color, setColor] = useState(account.color)
-  const [open, setOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => setColor(account.color), [account.color])
-  // The custom picker reports every step of a drag; save once it settles.
-  useEffect(() => {
-    if (color === account.color) return
-    const timer = setTimeout(() => {
-      patch(`/api/accounts/${account.id}`, { color })
-        .then(() => { setError(null); onSaved() })
-        .catch((e) => { setColor(account.color); setError(e instanceof Error ? e.message : String(e)) })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [color, account.id, account.color, onSaved])
-  const named = PALETTE.find((p) => p.hex === color.toLowerCase())
-  const box = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('pointerdown', away)
-    document.addEventListener('keydown', esc)
-    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc) }
-  }, [open])
-  return (
-    <span className="color-pick" ref={box}>
-      <button className="color-button" onClick={() => setOpen(!open)} aria-expanded={open}
-              title={error ?? `Color: ${named?.name ?? 'custom'}`} aria-label={`Color for ${account.label}`}>
-        <span className="swatch" style={{ background: color }} />
-      </button>
-      {open && (
-        <div className="color-menu" role="menu">
-          {PALETTE.map((p) => (
-            <button key={p.hex} role="menuitemradio" aria-checked={p.hex === color.toLowerCase()}
-                    className="color-choice tinted" style={accountStyle(p.hex)}
-                    onClick={() => { setColor(p.hex); setOpen(false) }}>
-              {p.name}{p.hex === color.toLowerCase() && ' ✓'}
-            </button>
-          ))}
-          <label className="color-choice custom">
-            Custom… <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-          </label>
-        </div>
-      )}
-    </span>
   )
 }
 

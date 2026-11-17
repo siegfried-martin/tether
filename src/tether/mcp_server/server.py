@@ -114,29 +114,36 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection], gmail:
 
     @server.tool(description=(
         "List tasks. status 'open' (default) returns each top-level task followed by its subtasks; 'done' "
-        "returns recently completed tasks. Each task shows its linked email (item_title, item_url) if any."))
-    async def list_tasks(status: Literal["open", "done"] = "open", parent_id: int | None = None) -> list[dict]:
-        return _sync_guard(tasks.list_tasks, get_conn(), status=status, parent_id=parent_id)
+        "returns recently completed tasks. Each task shows its tags and its linked email (item_title, "
+        "item_url) if any. tag (a tag name) keeps tasks with that tag."))
+    async def list_tasks(status: Literal["open", "done"] = "open", parent_id: int | None = None,
+                         tag: str | None = None) -> list[dict]:
+        return _sync_guard(tasks.list_tasks, get_conn(), status=status, parent_id=parent_id, tag=tag)
+
+    @server.tool(description="List the owner's task tags, with how many open and done tasks carry each.")
+    async def list_tags() -> list[dict]:
+        return tasks.list_tags(get_conn())
 
     @server.tool(description=(
         "Create a task. Link it to mail with item_id (from list_items) or thread (from search_mail); a thread "
         "is put under sync so a reply reopens it, and completing the task archives it. Tasks are two levels "
         "deep: parent_id must be a top-level task. due_at is a date (YYYY-MM-DD); priority is high, normal "
-        "or low."))
+        "or low. tags is a list of tag names; prefer existing ones (list_tags), new names become new tags."))
     async def create_task(title: str, parent_id: int | None = None, item_id: int | None = None,
                           thread: ThreadRef | None = None, due_at: str | None = None,
                           priority: Literal["high", "normal", "low"] | None = None,
-                          notes: str | None = None) -> dict:
+                          notes: str | None = None, tags: list[str] | None = None) -> dict:
         if thread is not None:
             if item_id is not None:
                 raise ToolError("pass item_id or thread, not both")
             item_id = await _guard(mail.ensure_item(get_conn(), gmail, thread.account, thread.thread_id))
         return _sync_guard(tasks.create_task, get_conn(), title=title, parent_id=parent_id, item_id=item_id,
-                           due_at=due_at, priority=priority, notes=notes)
+                           due_at=due_at, priority=priority, notes=notes, tags=tags)
 
     @server.tool(description=(
         "Edit a task. fields may set title, notes, due_at (YYYY-MM-DD), priority (high/normal/low), "
-        "sort_order (number; lower comes first) or parent_id. A null value clears that field."))
+        "sort_order (number; lower comes first), parent_id, or tags (a list of tag names that replaces the "
+        "task's tags; new names become new tags). A null value clears that field."))
     async def update_task(id: int, fields: dict[str, Any]) -> dict:
         return _sync_guard(tasks.update_task, get_conn(), id, fields)
 

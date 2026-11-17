@@ -158,3 +158,62 @@ def test_tasks_api(client, conn, fake_gmail, monkeypatch, acct):
     assert client.post(f"/api/tasks/{task['id']}/reopen").json()["status"] == "open"
     assert client.delete(f"/api/tasks/{task['id']}").status_code == 204
     assert client.delete(f"/api/tasks/{task['id']}").status_code == 404
+
+
+def test_tags_created_by_name_and_attached(conn):
+    a = tasks.create_task(conn, title="Call Zion", tags=["Zion", " #zion ", "Calls"])
+    assert [t["name"] for t in a["tags"]] == ["Calls", "Zion"]   # case-insensitive, one Zion
+    b = tasks.create_task(conn, title="Groceries", tags=["Home"])
+    colors = {t["name"]: t["color"] for t in tasks.list_tags(conn)}
+    assert len(set(colors.values())) == 3   # new tags take palette colors in turn
+    assert [t["title"] for t in tasks.list_tasks(conn, tag="ZION")] == ["Call Zion"]
+    tasks.update_task(conn, b["id"], {"tags": ["home", "Zion"]})
+    counts = {t["name"]: t["open_tasks"] for t in tasks.list_tags(conn)}
+    assert counts == {"Calls": 1, "Home": 1, "Zion": 2}
+    assert tasks.update_task(conn, b["id"], {"tags": None})["tags"] == []
+    with pytest.raises(tasks.TaskError):
+        tasks.create_task(conn, title="x", tags=["   "])
+    with pytest.raises(tasks.TaskError):
+        tasks.list_tasks(conn, tag="nope")
+
+
+def test_tag_rename_recolor_delete(conn):
+    task = tasks.create_task(conn, title="t", tags=["Work", "Home"])
+    work = next(t for t in task["tags"] if t["name"] == "Work")
+    assert tasks.update_tag(conn, work["id"], name="Zion", color="#B23B19")["color"] == "#b23b19"
+    with pytest.raises(tasks.TaskError) as err:
+        tasks.update_tag(conn, work["id"], name="home")
+    assert err.value.status == 409
+    with pytest.raises(tasks.TaskError):
+        tasks.update_tag(conn, work["id"], color="red")
+    assert tasks.create_tag(conn, "zion")["id"] == work["id"]   # existing name: the same tag
+    tasks.delete_tag(conn, work["id"])
+    assert [t["name"] for t in tasks.get_task(conn, task["id"])["tags"]] == ["Home"]
+    tasks.delete_task(conn, task["id"])
+    assert conn.execute("SELECT COUNT(*) FROM task_tag").fetchone()[0] == 0
+
+
+def test_task_page_tag_filter_keeps_groups_whole(conn):
+    parent = tasks.create_task(conn, title="Launch")
+    tasks.create_task(conn, title="Write copy", parent_id=parent["id"], tags=["Zion"])
+    tasks.create_task(conn, title="Other")
+    done = tasks.create_task(conn, title="Old", tags=["Zion"])
+    conn.execute("UPDATE task SET status = 'done', completed_at = '2026-11-14T00:00:00Z' WHERE id = ?", (done["id"],))
+    zion = tasks.list_tags(conn)[0]["id"]
+    page = tasks.task_page(conn, tag_id=zion)
+    assert [t["title"] for t in page["tasks"]] == ["Launch", "Write copy", "Old"]
+    assert page["open"] == 2 and page["total"] == 2
+
+
+def test_tags_api(client, conn, monkeypatch):
+    login(client, monkeypatch)
+    resp = client.post("/api/tasks", json={"title": "Call Zion", "tags": ["Zion"]})
+    assert resp.status_code == 201 and resp.json()["tags"][0]["name"] == "Zion"
+    task_id, tag_id = resp.json()["id"], resp.json()["tags"][0]["id"]
+    assert client.post("/api/tags", json={"name": "Home"}).status_code == 201
+    assert client.patch(f"/api/tasks/{task_id}", json={"tags": ["Zion", "Home"]}).json()["tags"][0]["name"] == "Home"
+    assert client.get(f"/api/tasks/page?tag={tag_id}").json()["total"] == 1
+    assert client.patch(f"/api/tags/{tag_id}", json={"name": "home"}).status_code == 409
+    assert client.patch(f"/api/tags/{tag_id}", json={"color": "#2e7a50"}).json()["color"] == "#2e7a50"
+    assert client.delete(f"/api/tags/{tag_id}").status_code == 204
+    assert [t["name"] for t in client.get("/api/tags").json()] == ["Home"]

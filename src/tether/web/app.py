@@ -52,6 +52,17 @@ class TaskCreate(BaseModel):
     notes: str | None = None
     due_at: str | None = None
     priority: str | None = None
+    tags: list[str] = []
+
+
+class TagIn(BaseModel):
+    name: str
+    color: str | None = None
+
+
+class TagUpdate(BaseModel):
+    name: str | None = None
+    color: str | None = None
 
 
 class DigestIn(BaseModel):
@@ -100,6 +111,7 @@ class TaskUpdate(BaseModel):
     priority: str | None = None
     sort_order: float | None = None
     parent_id: int | None = None
+    tags: list[str] | None = None   # replaces the task's tags; new names become new tags
 
 
 USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError)
@@ -351,9 +363,29 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             return tasks.list_tasks(conn, status=status)
 
     @app.get("/api/tasks/page")
-    async def task_page(offset: int = 0, limit: int = 50, _: str = Depends(require_user),
+    async def task_page(offset: int = 0, limit: int = 50, tag: int | None = None, _: str = Depends(require_user),
                         conn: sqlite3.Connection = Depends(conn_dep)):
-        return tasks.task_page(conn, offset=offset, limit=limit)
+        return tasks.task_page(conn, offset=offset, limit=limit, tag_id=tag)
+
+    @app.get("/api/tags")
+    async def list_tags(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        return tasks.list_tags(conn)
+
+    @app.post("/api/tags", status_code=201)
+    async def create_tag(body: TagIn, _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.create_tag(conn, body.name, body.color)
+
+    @app.patch("/api/tags/{tag_id}")
+    async def update_tag(tag_id: int, body: TagUpdate, _: str = Depends(require_user),
+                         conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return tasks.update_tag(conn, tag_id, name=body.name, color=body.color)
+
+    @app.delete("/api/tags/{tag_id}", status_code=204)
+    async def delete_tag(tag_id: int, _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            tasks.delete_tag(conn, tag_id)
 
     @app.post("/api/tasks", status_code=201)
     async def create_task(body: TaskCreate, _: str = Depends(require_user),

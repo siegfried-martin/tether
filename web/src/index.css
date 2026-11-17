@@ -128,7 +128,7 @@ h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; colo
 .color-pick { position: relative; display: inline-flex; }
 .color-button { background: none; border: 0; padding: 4px; cursor: pointer; display: inline-flex; border-radius: 6px; }
 .color-button:hover { background: var(--surface); }
-.accounts .color-pick .swatch { width: 18px; height: 18px; }
+.accounts .color-pick .swatch, .tag-list .color-pick .swatch { width: 18px; height: 18px; border-radius: 50%; min-height: 0; align-self: center; }
 .color-menu {
   position: absolute; z-index: 5; top: 100%; left: 0; display: grid; grid-template-columns: repeat(2, 7.5rem); gap: 4px;
   padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
@@ -221,7 +221,7 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 .tasks-page { max-width: 820px; }
 .add-task { display: flex; gap: 8px; margin: 16px 0 8px; }
 .add-task.sub { margin: 4px 0 0; }
-.add-task input, .task-editor input, .task-editor textarea, .task-editor select {
+.add-task input, .task-editor input, .task-editor textarea, .task-editor select, .tag-setting input {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
   border-radius: 6px; padding: 8px 10px; min-width: 0;
 }
@@ -237,6 +237,41 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 }
 .editing .task-title { white-space: normal; }
 .task-meta { display: flex; align-items: center; gap: 8px; flex: none; }
+/* Task tags: a chip carries its name, so the color only helps; it never has to be told apart. */
+.task-tags { display: flex; align-items: center; gap: 4px; min-width: 0; flex: none; }
+.tag-chip {
+  display: inline-flex; align-items: center; max-width: 12rem; border-radius: 999px; font-size: 0.75rem; line-height: 1.2;
+  background: color-mix(in srgb, var(--acct) var(--tint-hover), var(--bg)); border: 1px solid color-mix(in srgb, var(--acct) 55%, var(--bg));
+  color: var(--text);
+}
+.tag-chip > .tag-name, .tag-chip > button:first-child { padding: 2px 8px; }
+.tag-chip > button { background: none; border: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 999px; min-width: 0; }
+.tag-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.tag-chip:has(> button:first-child:hover) { background: color-mix(in srgb, var(--acct) 35%, var(--bg)); }
+.tag-chip.pressed { background: color-mix(in srgb, var(--acct) 40%, var(--bg)); border-color: var(--acct); box-shadow: 0 0 0 1px var(--acct); font-weight: 700; }
+.tag-remove { padding: 0 8px 0 0; font-size: 1rem; line-height: 1; color: var(--muted) !important; }
+.tag-remove:hover { color: var(--urgent-text) !important; }
+.tag-more { font-size: 0.75rem; }
+.tag-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; }
+.tag-filter .tag-chip { font-size: 0.85rem; }
+.tag-filter .tag-chip > button:first-child { padding: 4px 10px; }
+.tag-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tag-picker-label { margin-right: 4px; }
+.tag-input { position: relative; flex: 1; min-width: 10rem; }
+.tag-input input { width: 100%; }
+.tag-options {
+  position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 100%; max-width: 20rem; list-style: none; margin: 0; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.tag-options button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; background: none; border: 0; border-radius: 6px;
+  font: inherit; color: var(--text); text-align: left; cursor: pointer;
+}
+.tag-options button.active, .tag-options button:hover { background: var(--surface); }
+.tag-options .swatch { width: 10px; height: 10px; border-radius: 50%; min-height: 0; align-self: center; }
+.tag-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
+.tag-setting { display: flex; align-items: center; gap: 10px; }
+.tag-setting input { flex: 1; min-width: 0; max-width: 20rem; }
 .task-link { margin: 0 0 6px 28px; border-radius: 6px; font-size: 0.875rem; }
 .task-link-line { display: flex; align-items: center; min-width: 0; }
 .task-link-open {
@@ -260,6 +295,9 @@ button.link.danger { color: var(--urgent-text); }
 .task-row.done .task-link { opacity: 0.75; }
 @media (max-width: 480px) {
   .task-row.subtask, .task-link, .task-editor { margin-left: 0; }
+  /* Phones: tags get their own line under the title, so the title keeps its width. */
+  .task-line:has(.task-tags) { flex-wrap: wrap; row-gap: 0; }
+  .task-line .task-tags { order: 3; flex-basis: 100%; padding: 0 0 6px 30px; margin-top: -4px; }
   .task-row.subtask { padding-left: 20px; }
   .task-editor { margin-left: 0; }
   nav a { padding: 4px 6px; }

@@ -212,3 +212,53 @@ export function useSwipe(onSwipe: React.MutableRefObject<(dir: 1 | -1) => boolea
   }, [el, onSwipe, follow])
   return setEl
 }
+
+/** A color choice from the named palette (or a custom one), saved once it settles. */
+export function ColorPicker({ value, label, save }: { value: string; label: string; save: (color: string) => Promise<unknown> }) {
+  const [color, setColor] = useState(value)
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => setColor(value), [value])
+  // The custom picker reports every step of a drag; save once it settles.
+  useEffect(() => {
+    if (color === value) return
+    const timer = setTimeout(() => {
+      save(color)
+        .then(() => setError(null))
+        .catch((e) => { setColor(value); setError(e instanceof Error ? e.message : String(e)) })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [color, value])   // save is a fresh closure each render; the timer uses the latest
+  const named = PALETTE.find((p) => p.hex === color.toLowerCase())
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc) }
+  }, [open])
+  return (
+    <span className="color-pick" ref={box}>
+      <button className="color-button" onClick={() => setOpen(!open)} aria-expanded={open}
+              title={error ?? `Color: ${named?.name ?? 'custom'}`} aria-label={label}>
+        <span className="swatch" style={{ background: color }} />
+      </button>
+      {open && (
+        <div className="color-menu" role="menu">
+          {PALETTE.map((p) => (
+            <button key={p.hex} role="menuitemradio" aria-checked={p.hex === color.toLowerCase()}
+                    className="color-choice tinted" style={accountStyle(p.hex)}
+                    onClick={() => { setColor(p.hex); setOpen(false) }}>
+              {p.name}{p.hex === color.toLowerCase() && ' ✓'}
+            </button>
+          ))}
+          <label className="color-choice custom">
+            Custom… <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+          </label>
+        </div>
+      )}
+    </span>
+  )
+}

@@ -36,7 +36,11 @@ export type Task = {
   item_kind: Item['kind'] | null
   item_account: string | null
   item_color: string | null
+  tags: TagRef[]
 }
+
+export type TagRef = { id: number; name: string; color: string }
+export type Tag = TagRef & { open_tasks: number; done_tasks: number }
 
 export type ItemPage = { items: Item[]; total: number }
 export type TaskPage = { tasks: Task[]; total: number; open: number }
