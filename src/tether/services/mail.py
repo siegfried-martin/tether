@@ -126,6 +126,7 @@ def thread_text(thread: dict, *, body_cap: int = BODY_CAP) -> dict:
         body = message_body(payload)
         truncated = len(body) > body_cap
         out.append({
+            "id": m.get("id"),   # for create_draft's in_reply_to_message_id
             "from": headers.get("from", ""),
             "to": headers.get("to", ""),
             "cc": headers.get("cc", ""),

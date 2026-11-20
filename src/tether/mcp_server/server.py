@@ -20,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tether.config import Settings
 from tether.mcp_server.provider import ConsentRequests, TetherOAuthProvider
-from tether.services import calendar, digest, items, mail, overview, sync_state, tasks, triage
+from tether.services import calendar, compose, digest, items, mail, overview, sync_state, tasks, triage
 from tether.services.triage import GmailFactory
 
 MCP_PATH = "/mcp"
@@ -162,10 +162,46 @@ def build(settings: Settings, get_conn: Callable[[], sqlite3.Connection], gmail:
         return await _guard(mail.search_mail(get_conn(), gmail, query, account=account, limit=limit))
 
     @server.tool(description=(
-        "Read a Gmail thread: each message's sender, recipients, date and body as plain text, with "
+        "Read a Gmail thread: each message's id, sender, recipients, date and body as plain text, with "
         "attachments listed by name. Fetched live and not stored. account is the mailbox address."))
     async def get_thread(account: str, thread_id: str) -> dict:
         return await _guard(mail.get_thread(get_conn(), gmail, account, thread_id))
+
+    @server.tool(description=(
+        "Write a draft email in one of the owner's mailboxes (account is the mailbox address it goes out "
+        "from). This only saves a draft in that account's Gmail Drafts; it never sends. to, cc and bcc are "
+        f"lists of addresses ('Ann Lee <ann@x.com>' or 'ann@x.com'), at most {compose.MAX_RECIPIENTS} in all. "
+        "body is plain text; html_body is optional. To reply, pass in_reply_to_message_id (a message id "
+        "from get_thread, in the same account): the draft joins that thread for everyone, and subject may be "
+        "left out to keep the thread's subject (a different subject is refused, as it would split the "
+        "thread). Returns the draft as Gmail stored it: draft_id, exact recipients, subject and body, and a "
+        "url to open it in Gmail. Show the owner the draft before any send."))
+    async def create_draft(account: str, to: list[str], body: str, subject: str | None = None,
+                           cc: list[str] | None = None, bcc: list[str] | None = None,
+                           in_reply_to_message_id: str | None = None, html_body: str | None = None) -> dict:
+        return await _guard(compose.create_draft(
+            get_conn(), gmail, account, to=to, cc=cc, bcc=bcc, subject=subject, body=body,
+            in_reply_to_message_id=in_reply_to_message_id, html_body=html_body))
+
+    @server.tool(description=(
+        "Read a draft back as Gmail has it now (recipients, subject, body, threading headers), to check it "
+        "before sending. The owner may have edited it in Gmail since it was made."))
+    async def get_draft(account: str, draft_id: str) -> dict:
+        return await _guard(compose.get_draft(get_conn(), gmail, account, draft_id))
+
+    @server.tool(description="Delete a draft made with create_draft, without sending it.")
+    async def delete_draft(account: str, draft_id: str) -> dict:
+        return await _guard(compose.delete_draft(get_conn(), gmail, account, draft_id))
+
+    @server.tool(description=(
+        "Send one draft made with create_draft, exactly as it is stored: recipients and body can't be "
+        "changed here (to change them, delete the draft and make a new one). Only call this when the owner "
+        "has seen this draft and asked, in this conversation, for it to be sent; never send on your own "
+        "initiative, and never loop over drafts. One draft per call, at most "
+        f"{compose.MAX_SENDS_PER_HOUR} sends an hour. Every send is logged in Tether. Returns the sent "
+        "message's id, thread and recipients."))
+    async def send_draft(account: str, draft_id: str) -> dict:
+        return await _guard(compose.send_draft(get_conn(), gmail, account, draft_id))
 
     @server.tool(description=(
         "Ingest a work-mail digest the owner pasted (ITEM blocks with From, Subject, Received, Needed, Due, "

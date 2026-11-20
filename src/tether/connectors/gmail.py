@@ -177,6 +177,11 @@ class GmailApi(Protocol):
     async def modify_thread(self, thread_id: str, *, add: list[str] = (), remove: list[str] = ()) -> bool: ...
     async def get_thread_full(self, thread_id: str) -> dict | None: ...
     async def search_thread_ids(self, query: str, limit: int) -> list[str]: ...
+    async def get_message_meta(self, message_id: str, headers: list[str]) -> dict | None: ...
+    async def create_draft(self, raw: str, thread_id: str | None) -> dict: ...
+    async def get_draft(self, draft_id: str) -> dict | None: ...
+    async def delete_draft(self, draft_id: str) -> bool: ...
+    async def send_draft(self, draft_id: str) -> dict | None: ...
 
 
 class GmailClient(GoogleClient):
@@ -231,6 +236,45 @@ class GmailClient(GoogleClient):
         resp = await self._get("/threads", {"q": query, "maxResults": limit})
         resp.raise_for_status()
         return [t["id"] for t in resp.json().get("threads", [])]
+
+    async def get_message_meta(self, message_id: str, headers: list[str]) -> dict | None:
+        resp = await self._get(f"/messages/{quote(message_id, safe='')}",
+                               {"format": "metadata", "metadataHeaders": headers})
+        if resp.status_code in (400, 404):
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    # Drafts. raw is a base64url RFC 2822 message; Gmail fills in From with the default address.
+
+    async def create_draft(self, raw: str, thread_id: str | None) -> dict:
+        message = {"raw": raw, **({"threadId": thread_id} if thread_id else {})}
+        resp = await self._request("POST", "/drafts", json={"message": message})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_draft(self, draft_id: str) -> dict | None:
+        """The draft with its full message. Callers must not store or log the body."""
+        resp = await self._get(f"/drafts/{quote(draft_id, safe='')}", {"format": "full"})
+        if resp.status_code in (400, 404):
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def delete_draft(self, draft_id: str) -> bool:
+        resp = await self._request("DELETE", f"/drafts/{quote(draft_id, safe='')}")
+        if resp.status_code in (400, 404):
+            return False
+        resp.raise_for_status()
+        return True
+
+    async def send_draft(self, draft_id: str) -> dict | None:
+        """Send the draft exactly as stored (only its id goes up). None when it no longer exists."""
+        resp = await self._request("POST", "/drafts/send", json={"id": draft_id})
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
 
     async def list_history(self, start_history_id: str) -> tuple[list[dict], str]:
         records, page, latest = [], None, start_history_id

@@ -110,7 +110,8 @@ def test_full_flow_then_tool_call(client, monkeypatch):
     assert {t["name"] for t in tools} == {
         "sync_status", "list_items", "archive_item", "unarchive_item", "get_overview", "list_tasks",
         "create_task", "update_task", "complete_task", "search_mail", "get_thread", "ingest_digest",
-        "get_agenda", "release_calendar_hold", "list_tags"}
+        "get_agenda", "release_calendar_hold", "list_tags", "create_draft", "get_draft", "delete_draft",
+        "send_draft"}
     called = rpc(client, tokens["access_token"], "tools/call", {"name": "sync_status", "arguments": {}})
     assert called.status_code == 200 and "error" not in called.json()
 
