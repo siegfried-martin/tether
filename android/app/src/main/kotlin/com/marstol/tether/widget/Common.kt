@@ -74,8 +74,8 @@ fun tint(hex: String?, alpha: Float = 0.22f): ColorProvider =
 val Muted = 12.sp
 val Body = 14.sp
 
-/** Widget background: Tether's navy (the app's brand color, #1f2a44) in dark mode, near-white in light. */
-val Surface = DayNightColorProvider(day = Color(0xFFF8F9FB), night = Color(0xFF1F2A44))
+/** Widget background: the app's own page background (the bg variable in web/src/index.css) in each mode. */
+val Surface = DayNightColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFF12151A))
 
 /** The rounded widget surface; text and accents still follow the wallpaper's colors. */
 @Composable
