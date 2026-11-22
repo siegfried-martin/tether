@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { del, get, patch, post, type Account, type Connection, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
 import { accountStyle, ColorPicker, DueLabel, useSwipe, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
-import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
+import { CalendarPage, CalendarSettings } from './Calendar'
 import { TagSettings, TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
 import { InstallBanner } from './Install'
@@ -184,18 +184,6 @@ function Home({ loc }: { loc: Location }) {
     }
   }
 
-  const completeTask = async (task: Task) => {
-    try {
-      const done = await post<Task & { warnings: string[] }>(`/api/tasks/${task.id}/complete`)
-      setToast(done.warnings.length ? { text: done.warnings.join(' '), error: true }
-        : { text: `Done: ${task.title}`, undo: () => { setToast(null); post(`/api/tasks/${task.id}/reopen`).then(refresh) } })
-    } catch (e) {
-      setToast({ text: errorText(e), error: true })
-    } finally {
-      refresh()
-    }
-  }
-
   const counts = overview.data?.inbox
   const shown = list.data?.items.filter((i) => !moved.has(i.id))
   const accountsSeen = accountList.data ?? []
@@ -206,8 +194,7 @@ function Home({ loc }: { loc: Location }) {
 
   return (
     <main>
-      {overview.data && <Urgent urgent={overview.data.urgent} onComplete={completeTask} />}
-      {overview.data?.calendar && <TodayCard events={overview.data.calendar.today} />}
+      {overview.data && <Alerts alerts={overview.data.urgent.alerts} />}
       <section>
         <div className="inbox-head">
           <div className="tabs" role="tablist">
@@ -249,27 +236,12 @@ function Home({ loc }: { loc: Location }) {
   )
 }
 
-function Urgent({ urgent, onComplete }: { urgent: Overview['urgent']; onComplete: (t: Task) => void }) {
-  const empty = !urgent.alerts.length && !urgent.tasks.length && !urgent.items.length
-  if (empty) return null
+/** Account problems (a mailbox that needs reconnecting, say): the only thing shown above the mail. */
+function Alerts({ alerts }: { alerts: Overview['urgent']['alerts'] }) {
+  if (!alerts.length) return null
   return (
-    <section className="urgent" aria-label="Urgent">
-      {urgent.alerts.map((a) => <div key={`${a.kind}-${a.account}`} className="alert">{a.message}</div>)}
-      {urgent.tasks.map((t) => (
-        <div key={`t${t.id}`} className="urgent-row">
-          <input type="checkbox" className="check" aria-label={`Complete: ${t.title}`} onChange={() => onComplete(t)} />
-          <span className="grow">{t.title}</span>
-          <DueLabel due={t.due_at} />
-        </div>
-      ))}
-      {urgent.items.map((i) => (
-        <a key={`i${i.id}`} className="urgent-row tinted" style={accountStyle(i.account_color)}
-           href={i.url ?? undefined} target="_blank" rel="noreferrer">
-          <span className="grow">{i.title}</span>
-          {i.priority === 'high' && <span className="flag">High</span>}
-          <DueLabel due={i.due_at} />
-        </a>
-      ))}
+    <section className="urgent" aria-label="Alerts">
+      {alerts.map((a) => <div key={`${a.kind}-${a.account}`} className="alert">{a.message}</div>)}
     </section>
   )
 }

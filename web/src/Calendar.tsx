@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { del, patch, post, type AgendaEvent, type CalendarStatus, type DeleteResult, type Hold } from './api'
 import { DRAFT_ID, draftEvent, EventEditor, newDraft, type Draft } from './NewEvent'
 import { accountStyle, errorText, Linkified, SHORT_SCREEN, ToastView, useMedia, usePolling, useSwipe, useToast } from './shared'
-import { linkProps, navigate, withParams, type Location } from './route'
+import { navigate, withParams, type Location } from './route'
 
 // ------------------------------------------------------------------ dates
 
@@ -638,34 +638,6 @@ const TrashIcon = () => (
 )
 
 // ------------------------------------------------------------------ home card
-
-/** Today's events on the home screen: what's left of the day, then a link to the full calendar. */
-export function TodayCard({ events }: { events: AgendaEvent[] }) {
-  const now = new Date()
-  const left = events.filter((e) => e.all_day || new Date(e.end) > now)
-  return (
-    <section className="today-card">
-      <div className="card-head">
-        <h2>Today</h2>
-        <a className="link" {...linkProps('/calendar')}>Calendar</a>
-      </div>
-      {left.length === 0 ? <p className="muted">{events.length ? 'Nothing more today.' : 'Nothing on the calendar today.'}</p>
-        : (
-          <ul className="events compact">
-            {left.map((e) => (
-              <li key={e.id} className={`event tinted ${e.busy}`} style={eventStyle(e)}>
-                <span className="event-time">{e.all_day ? 'All day' : clock(e.start)}</span>
-                <span className="event-main">
-                  <span className="event-title">{e.title}</span>
-                </span>
-                {e.join_url && <a className="button join" href={e.join_url} target="_blank" rel="noreferrer">Join</a>}
-              </li>
-            ))}
-          </ul>
-        )}
-    </section>
-  )
-}
 
 // ------------------------------------------------------------------ settings
 
