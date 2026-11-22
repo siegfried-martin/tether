@@ -8,11 +8,8 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.LocalContext
-import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
@@ -33,8 +30,6 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.compose.ui.unit.sp
-import com.marstol.tether.R
-import com.marstol.tether.data.ActionWorker
 import com.marstol.tether.data.InboxItem
 import com.marstol.tether.data.Store
 import com.marstol.tether.data.Sync
@@ -45,7 +40,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-/** Open mail from every account (or one), newest first, with a button to archive each. */
+/**
+ * Open mail from every account (or one), newest first. Read-only on purpose: no archive
+ * button, so a stray touch on the home screen can't lose an email.
+ */
 class InboxWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
@@ -60,11 +58,10 @@ class InboxWidget : GlanceAppWidget() {
         val context = LocalContext.current
         val body = Store.read(context, Store.inboxName(account))
         val inbox = body?.takeUnless { it.contains("\"missing\"") }?.let { runCatching { parseInbox(it) }.getOrNull() }
-        val gone = Archiving.ids(context)
         val page = "/inbox" + (account?.let { "?account=" + android.net.Uri.encode(it) } ?: "")
         WidgetFrame {
-            val shown = inbox?.items?.filter { it.id !in gone }
-            val count = inbox?.let { (it.count - (it.items.size - shown!!.size)).coerceAtLeast(0) }
+            val shown = inbox?.items
+            val count = inbox?.count
             Header(listOfNotNull(account ?: "Inbox", count?.toString()).joinToString("  "), openInApp(context, page),
                    refreshIcon() to actionRunCallback<RefreshAction>())
             when {
@@ -103,7 +100,6 @@ class InboxWidget : GlanceAppWidget() {
                     if (sub.isNotEmpty()) Text(sub, maxLines = 1,
                         style = TextStyle(fontSize = Muted, color = GlanceTheme.colors.onSurfaceVariant))
                 }
-                IconButton(R.drawable.ic_archive, actionRunCallback<ArchiveItem>(actionParametersOf(ArchiveItem.ID to item.id)))
             }
         }
     }
@@ -122,22 +118,6 @@ class InboxWidget : GlanceAppWidget() {
             at.year == today.year -> at.format(DateTimeFormatter.ofPattern("MMM d"))
             else -> at.format(DateTimeFormatter.ofPattern("M/d/yy"))
         }
-    }
-}
-
-/** Emails archived from the widget, hidden at once while the server catches up. */
-object Archiving : PendingSet("archiving")
-
-class ArchiveItem : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val id = parameters[ID] ?: return
-        Archiving.add(context, id)
-        Sync.redraw(context)
-        Sync.act(context, ActionWorker.ARCHIVE, id)
-    }
-
-    companion object {
-        val ID = ActionParameters.Key<Int>("item_id")
     }
 }
 

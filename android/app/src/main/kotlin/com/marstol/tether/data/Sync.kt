@@ -23,7 +23,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.marstol.tether.widget.ACCOUNT
 import com.marstol.tether.widget.AgendaWidget
-import com.marstol.tether.widget.Archiving
 import com.marstol.tether.widget.Pending
 import com.marstol.tether.widget.InboxWidget
 import com.marstol.tether.widget.DATA_VERSION
@@ -63,7 +62,7 @@ object Sync {
     }
 
     /**
-     * A widget button's server call (complete a task, archive an email), then a sync. Run as
+     * A widget button's server call (complete a task), then a sync. Run as
      * background work: a widget tap must return at once, and Android may freeze or kill the
      * app as soon as it does.
      */
@@ -154,7 +153,6 @@ class ActionWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val kind = inputData.getString(KIND)
         val (path, pending) = when (kind) {
             COMPLETE -> "/api/tasks/$id/complete" to Pending
-            ARCHIVE -> "/api/items/$id/archive" to Archiving
             else -> return Result.failure()
         }
         try {
@@ -175,7 +173,6 @@ class ActionWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KIND = "kind"
         const val ID = "id"
         const val COMPLETE = "complete"
-        const val ARCHIVE = "archive"
     }
 }
 
