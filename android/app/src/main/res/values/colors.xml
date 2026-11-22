@@ -3,4 +3,7 @@
     <!-- Matches theme_color in web/public/manifest.webmanifest. -->
     <color name="brand">#1F2A44</color>
     <color name="brass">#D9AD72</color>
+    <!-- The page background (the bg variable in web/src/index.css), so the system bars match the header. -->
+    <color name="page_light">#FFFFFF</color>
+    <color name="page_dark">#12151A</color>
 </resources>
