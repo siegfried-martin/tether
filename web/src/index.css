@@ -305,6 +305,9 @@ span.drag-handle:hover { background: var(--border); }
 .task-row.dragging { opacity: 0.4; }
 .task-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .task-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* A task opened from a link (the phone widget): a brief tint so the eye finds it. */
+.task-row.spotlight { animation: spotlight 2s ease-out; }
+@keyframes spotlight { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
 @media (max-width: 480px) {
   .task-row.subtask, .task-link, .task-editor { margin-left: 0; }
   /* Phones: tags get their own line under the title, so the title keeps its width. */

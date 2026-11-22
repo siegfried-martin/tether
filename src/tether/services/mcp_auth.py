@@ -99,3 +99,55 @@ def revoke(conn: sqlite3.Connection, token: str) -> None:
 
 def purge_expired(conn: sqlite3.Connection) -> int:
     return conn.execute("DELETE FROM oauth_token WHERE expires_at < ?", (int(time.time()),)).rowcount
+
+
+# --------------------------------------------------------------------------- the Android app
+#
+# The phone app signs in through this same server, as a built-in public client
+# (PKCE, no secret) whose codes go back to the app's own URL scheme. Its tokens
+# work on /api only, and Claude's connector tokens work on /mcp only.
+
+APP_CLIENT_ID = "tether-android"
+APP_CLIENT_NAME = "Tether for Android"
+
+
+def ensure_app_client(conn: sqlite3.Connection, redirect_uri: str) -> None:
+    """Register (or update) the app's client. Called at startup."""
+    info = {"client_id": APP_CLIENT_ID, "client_name": APP_CLIENT_NAME, "redirect_uris": [redirect_uri],
+            "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"]}
+    with tx(conn):
+        save_client(conn, APP_CLIENT_ID, info)
+
+
+def app_subject(conn: sqlite3.Connection, token: str) -> str | None:
+    """Who an app access token belongs to; None unless it is a live token issued to the app."""
+    found = lookup(conn, token, "access")
+    return found["subject"] if found and found["client_id"] == APP_CLIENT_ID else None
+
+
+def connections(conn: sqlite3.Connection) -> list[dict]:
+    """Live connections: grants that still hold an unexpired refresh token, most recently active first."""
+    rows = conn.execute(
+        """SELECT g.id, g.client_id, c.info, g.created_at, MAX(t.created_at) AS last_active
+           FROM oauth_grant g
+           JOIN oauth_client c ON c.client_id = g.client_id
+           JOIN oauth_token t ON t.grant_id = g.id
+           WHERE g.revoked_at IS NULL
+           GROUP BY g.id
+           HAVING MAX(t.kind = 'refresh' AND t.expires_at > ?)
+           ORDER BY last_active DESC""",
+        (int(time.time()),),
+    ).fetchall()
+    return [{"id": r["id"],
+             "kind": "app" if r["client_id"] == APP_CLIENT_ID else "mcp",
+             "name": json.loads(r["info"]).get("client_name") or "MCP client",
+             "created_at": r["created_at"], "last_active": r["last_active"]} for r in rows]
+
+
+def revoke_grant(conn: sqlite3.Connection, grant_id: int) -> bool:
+    with tx(conn):
+        hit = conn.execute("UPDATE oauth_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                           (utcnow(), grant_id)).rowcount
+        conn.execute("DELETE FROM oauth_token WHERE grant_id = ?", (grant_id,))
+    return bool(hit)

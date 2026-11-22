@@ -6,7 +6,9 @@ Start it with `python -m tether serve`, which always runs exactly one worker
 
 import asyncio
 import contextlib
+import hashlib
 import html
+import json
 import logging
 import secrets
 import sqlite3
@@ -16,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi import Form
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from mcp.server.auth.provider import construct_redirect_uri
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -31,7 +33,8 @@ from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import CalendarPoller, GmailPoller
-from tether.services import accounts, calendar, digest, items, mail, overview, sync_state, tasks, triage
+from tether.services import (accounts, calendar, digest, items, mail, mcp_auth, overview, sync_state, tasks, triage,
+                             widget)
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +146,7 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.conn = conn or db.connect(settings.db_path)
+        mcp_auth.ensure_app_client(app.state.conn, settings.app_redirect_uri)
         app.state.vault = Vault(settings.encryption_key)
         app.state.http = httpx.AsyncClient(timeout=30)
         app.state.gmail = GmailPoller(app.state.conn, app.state.vault, app.state.http, settings)
@@ -172,11 +176,23 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     async def conn_dep(request: Request) -> sqlite3.Connection:
         return request.app.state.conn
 
-    async def require_user(request: Request) -> str:
+    async def require_session(request: Request) -> str:
+        """The owner signed in to this browser."""
         user = request.session.get("user")
         if not user:
             raise HTTPException(401, "sign in required")
         return user
+
+    async def require_user(request: Request) -> str:
+        """The owner, signed in to this browser or through the Android app's bearer token."""
+        auth = request.headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            subject = mcp_auth.app_subject(request.app.state.conn, auth[7:].strip())
+            if not subject:
+                raise HTTPException(401, "token invalid or expired",
+                                    headers={"WWW-Authenticate": 'Bearer error="invalid_token"'})
+            return subject
+        return await require_session(request)
 
     # ---------------------------------------------------------------- auth
 
@@ -369,9 +385,9 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             return tasks.list_tasks(conn, status=status)
 
     @app.get("/api/tasks/page")
-    async def task_page(offset: int = 0, limit: int = 50, tag: int | None = None, _: str = Depends(require_user),
-                        conn: sqlite3.Connection = Depends(conn_dep)):
-        return tasks.task_page(conn, offset=offset, limit=limit, tag_id=tag)
+    async def task_page(offset: int = 0, limit: int = 50, tag: int | None = None, focus: int | None = None,
+                        _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        return tasks.task_page(conn, offset=offset, limit=limit, tag_id=tag, focus=focus)
 
     @app.get("/api/tags")
     async def list_tags(_: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
@@ -436,6 +452,54 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         with user_errors():
             return await mail.search_mail(request.app.state.conn, request.app.state.gmail_clients, q,
                                           account=account, limit=limit)
+
+    # ------------------------------------------------------------- widgets
+
+    def etagged(request: Request, payload: dict) -> Response:
+        """JSON with an ETag, so a widget's poll of unchanged data is a bodiless 304."""
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        tag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+        headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
+        if tag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
+
+    @app.get("/api/widget/tasks")
+    async def widget_tasks(request: Request, tag: int | None = None, limit: int = 50, _: str = Depends(require_user),
+                           conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return etagged(request, widget.widget_tasks(conn, settings.today(), tag_id=tag, limit=limit))
+
+    @app.get("/api/widget/calendar")
+    async def widget_calendar(request: Request, start: str | None = None, days: int = 7,
+                              _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            first, _last = calendar.parse_range(start, None, settings.today())
+            return etagged(request, widget.widget_calendar(conn, first, days, settings.tz, settings.today()))
+
+    # --------------------------------------------------------- connections
+
+    @app.get("/api/connections")
+    async def list_connections(_: str = Depends(require_session), conn: sqlite3.Connection = Depends(conn_dep)):
+        return mcp_auth.connections(conn)
+
+    @app.delete("/api/connections/{grant_id}", status_code=204)
+    async def revoke_connection(grant_id: int, _: str = Depends(require_session),
+                                conn: sqlite3.Connection = Depends(conn_dep)):
+        if not mcp_auth.revoke_grant(conn, grant_id):
+            raise HTTPException(404, f"no connection {grant_id}")
+
+    @app.get("/.well-known/assetlinks.json", include_in_schema=False)
+    async def assetlinks():
+        """Digital Asset Links: proves the Android app may open this site full screen."""
+        prints = [f.strip().upper() for f in settings.android_cert_sha256.split(",") if f.strip()]
+        if not prints:
+            raise HTTPException(404)
+        return JSONResponse([{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {"namespace": "android_app", "package_name": settings.android_package,
+                       "sha256_cert_fingerprints": prints},
+        }])
 
     # ------------------------------------------------------------ calendar
 
@@ -550,7 +614,7 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
 
 def _consent_page(pending: dict, req: str, csrf: str, user: str) -> str:
     client = html.escape(pending["client_name"] or "An MCP client")
-    dest = html.escape(urlparse(pending["redirect_uri"]).netloc)
+    dest = html.escape(urlparse(pending["redirect_uri"]).netloc or "the app")
     e = html.escape
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

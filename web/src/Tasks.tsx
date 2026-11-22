@@ -13,10 +13,13 @@ const CAN_DRAG = '(min-width: 481px) and (pointer: fine)'
 export function TasksPage({ loc }: { loc: Location }) {
   const page = pageParam(loc.params)
   const tagId = Number(loc.params.get('tag')) || null
-  const list = usePolling<TaskPage>(`/api/tasks/page?offset=${(page - 1) * PAGE_SIZE}&limit=${PAGE_SIZE}${tagId ? `&tag=${tagId}` : ''}`)
+  // ?task=ID (a link from the phone widget) opens that task, on whichever page it is.
+  const focus = Number(loc.params.get('task')) || null
+  const list = usePolling<TaskPage>(`/api/tasks/page?offset=${(page - 1) * PAGE_SIZE}&limit=${PAGE_SIZE}`
+    + `${tagId ? `&tag=${tagId}` : ''}${focus ? `&focus=${focus}` : ''}`)
   const tags = usePolling<Tag[]>('/api/tags')
   const filter = tags.data?.find((t) => t.id === tagId) ?? null
-  const filterBy = (id: number | null) => navigate(withParams({ tag: id, page: null }))
+  const filterBy = (id: number | null) => navigate(withParams({ tag: id, page: null, task: null }))
   const [editing, setEditing] = useState<number | null>(null)
   const [reading, setReading] = useState<number | null>(null)
   // Checked at once, before the server answers.
@@ -27,6 +30,30 @@ export function TasksPage({ loc }: { loc: Location }) {
   const [moved, setMoved] = useState<{ base: TaskPage; rows: Task[] } | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
   const [drop, setDrop] = useState<Drop | null>(null)
+  const [spot, setSpot] = useState<number | null>(null)
+
+  // Once the page holding the linked task arrives: open it, and swap ?task= for that page's number.
+  useEffect(() => {
+    if (!focus || list.data?.focus !== focus) return
+    const found = list.data.tasks.find((t) => t.id === focus)
+    if (found) {
+      if (found.status === 'open') setEditing(focus)
+      setSpot(focus)
+    } else {
+      setToast({ text: "That task isn't here any more.", error: true })
+    }
+    const at = list.data.offset / PAGE_SIZE + 1
+    navigate(withParams({ task: null, page: at > 1 ? at : null }), { replace: true })
+  }, [focus, list.data])
+  useEffect(() => {
+    if (spot === null) return
+    const el = document.querySelector<HTMLElement>(`li[data-task="${spot}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.classList.add('spotlight')
+    const done = setTimeout(() => { el.classList.remove('spotlight'); setSpot(null) }, 2000)
+    return () => clearTimeout(done)
+  }, [spot, list.data])
 
   const refresh = () => { list.reload(); tags.reload() }
   const fail = (e: unknown) => setToast({ text: errorText(e), error: true })

@@ -145,7 +145,7 @@ class TetherOAuthProvider:
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         found = mcp_auth.lookup(self._conn(), token, "access")
-        if not found:
+        if not found or found["client_id"] == mcp_auth.APP_CLIENT_ID:   # app tokens are for /api only
             return None
         return AccessToken(token=token, client_id=found["client_id"], scopes=found["scopes"],
                            expires_at=found["expires_at"], resource=found["resource"], subject=found["subject"])

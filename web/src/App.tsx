@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { get, patch, post, type Account, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
+import { del, get, patch, post, type Account, type Connection, type Item, type ItemPage, type Overview, type SyncRow, type SyncSettings, type Task } from './api'
 import { accountStyle, ColorPicker, DueLabel, useSwipe, errorText, PAGE_SIZE, Pager, pageParam, relativeTime, ToastView, usePolling, useToast } from './shared'
 import { CalendarPage, CalendarSettings, TodayCard } from './Calendar'
 import { TagSettings, TasksPage } from './Tasks'
@@ -354,6 +354,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
           </tbody>
         </table>
       </section>
+      <ConnectedApps />
       <section>
         <button className="button secondary" onClick={() => post('/auth/logout').then(onSignedOut)}>Sign out</button>
       </section>
@@ -419,6 +420,44 @@ const CATEGORY_LABELS: Record<string, string> = {
   promotions: 'Promotions',
   social: 'Social',
   forums: 'Forums',
+}
+
+/** Apps signed in to Tether through its OAuth server: the Android app, and Claude's connector. */
+function ConnectedApps() {
+  const list = usePolling<Connection[]>('/api/connections')
+  const [toast, setToast] = useToast()
+  const disconnect = async (c: Connection) => {
+    if (!confirm(`Disconnect ${c.name}? It loses access at once and has to sign in again.`)) return
+    try {
+      await del(`/api/connections/${c.id}`)
+      setToast({ text: `Disconnected ${c.name}` })
+    } catch (e) {
+      setToast({ text: errorText(e), error: true })
+    } finally {
+      list.reload()
+    }
+  }
+  return (
+    <section>
+      <h2>Connected apps</h2>
+      {list.error && <p className="error">Couldn't load connected apps: {list.error}</p>}
+      {list.data?.length === 0 && <p className="muted">Nothing connected. The Android app and Claude show here once they sign in.</p>}
+      <ul className="accounts">
+        {list.data?.map((c) => (
+          <li key={c.id} className="account">
+            <div className="account-head">
+              <span className="grow">
+                {c.name}
+                <span className="hint"> · {c.kind === 'app' ? 'phone app' : 'connector'} · active {relativeTime(c.last_active)}</span>
+              </span>
+              <button className="link" onClick={() => disconnect(c)}>Disconnect</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <ToastView toast={toast} />
+    </section>
+  )
 }
 
 function AccountRow({ account, onSaved }: { account: Account; onSaved: () => void }) {

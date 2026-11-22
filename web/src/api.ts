@@ -43,7 +43,10 @@ export type TagRef = { id: number; name: string; color: string }
 export type Tag = TagRef & { open_tasks: number; done_tasks: number }
 
 export type ItemPage = { items: Item[]; total: number }
-export type TaskPage = { tasks: Task[]; total: number; open: number }
+export type TaskPage = { tasks: Task[]; total: number; open: number; offset: number; focus: number | null; found: boolean }
+
+/** A device or client signed in to Tether: the Android app, or an MCP connector such as Claude. */
+export type Connection = { id: number; kind: 'app' | 'mcp'; name: string; created_at: string; last_active: string }
 
 export type ThreadMessage = {
   from: string

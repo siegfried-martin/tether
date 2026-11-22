@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { del, patch, post, type AgendaEvent, type CalendarStatus, type DeleteResult, type Hold } from './api'
 import { DRAFT_ID, draftEvent, EventEditor, newDraft, type Draft } from './NewEvent'
 import { accountStyle, errorText, Linkified, SHORT_SCREEN, ToastView, useMedia, usePolling, useSwipe, useToast } from './shared'
-import { linkProps, navigate, type Location } from './route'
+import { linkProps, navigate, withParams, type Location } from './route'
 
 // ------------------------------------------------------------------ dates
 
@@ -119,7 +119,18 @@ export function CalendarPage({ loc, barSlot }: { loc: Location; barSlot: HTMLEle
 
   const [first, last] = range(view ?? 'week', anchor)
   // A day early, so an overnight event that started yesterday still shows this morning.
-  const agenda = usePolling<AgendaEvent[]>(view ? `/api/agenda?start=${plusDays(first, -1)}&end=${last}` : '')
+  const agendaPath = view ? `/api/agenda?start=${plusDays(first, -1)}&end=${last}` : ''
+  const agenda = usePolling<AgendaEvent[]>(agendaPath)
+
+  // ?event=ID (a link from the phone widget) opens that event once this range has loaded.
+  const linked = Number(loc.params.get('event')) || null
+  useEffect(() => {
+    if (!linked || !agenda.data || agenda.loaded !== agendaPath) return
+    const hit = agenda.data.find((e) => e.id === linked)
+    if (hit) setPicked(hit)
+    else setToast({ text: "That event isn't on the calendar any more.", error: true })
+    navigate(withParams({ event: null }), { replace: true })
+  }, [linked, agenda.data, agenda.loaded, agendaPath])
   if (!view) return null
 
   const go = (to: View, date: string) => navigate(`/calendar/${to}${date === today ? '' : `?date=${date}`}`)

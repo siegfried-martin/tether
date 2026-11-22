@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # callbacks, plus loopback for Claude Code. Comma-separated.
     mcp_redirect_hosts: str = "claude.ai,claude.com,localhost,127.0.0.1"
 
+    # The Android app: its package name, and the SHA-256 fingerprints of the keys it is signed with
+    # (comma-separated, AA:BB:...). The fingerprints go in /.well-known/assetlinks.json, which lets the
+    # app open tether.marstol.com full screen. Until they are set, that file is a 404.
+    android_package: str = "com.marstol.tether"
+    android_cert_sha256: str = ""
+
     # The owner's time zone (IANA name). Decides what "today" means for due dates
     # and the agenda, and how the work digest's times are read.
     timezone: str = "UTC"
@@ -82,6 +88,11 @@ class Settings(BaseSettings):
     @property
     def redirect_uri(self) -> str:
         return self.base_url.rstrip("/") + "/auth/google/callback"
+
+    @property
+    def app_redirect_uri(self) -> str:
+        """Where sign-in codes for the Android app go: the app's own URL scheme (RFC 8252)."""
+        return f"{self.android_package}:/oauth2redirect"
 
     @property
     def secure_cookies(self) -> bool:

@@ -29,15 +29,18 @@ export function useMedia(query: string): boolean {
 /** Short screens (a phone on its side) get the compact calendar: its toolbar joins the header row. */
 export const SHORT_SCREEN = '(max-height: 500px)'
 
-export function usePolling<T>(path: string): { data: T | null; error: string | null; reload: () => void } {
+/** GET a path now and every REFRESH_MS. `data` stays from the last path until the new one answers;
+ *  `loaded` says which path it came from. */
+export function usePolling<T>(path: string): { data: T | null; loaded: string | null; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null)
+  const [loaded, setLoaded] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const current = useRef(path)
   current.current = path
   const reload = useCallback(() => {
     if (!path) return
     get<T>(path)
-      .then((d) => { if (current.current === path) { setData(d); setError(null) } })   // drop a stale answer
+      .then((d) => { if (current.current === path) { setData(d); setLoaded(path); setError(null) } })   // drop a stale answer
       .catch((e) => {
         if (current.current !== path) return
         if (e instanceof Unauthorized) location.reload()
@@ -51,7 +54,7 @@ export function usePolling<T>(path: string): { data: T | null; error: string | n
     document.addEventListener('visibilitychange', onVisible)
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [reload])
-  return { data, error, reload }
+  return { data, loaded, error, reload }
 }
 
 export type Toast = { text: string; error?: boolean; undo?: () => void }

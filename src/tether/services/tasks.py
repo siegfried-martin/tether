@@ -86,13 +86,18 @@ def list_tasks(conn: sqlite3.Connection, *, status: str | None = "open", parent_
     return _with_tags(conn, [dict(r) for r in rows])
 
 
-def task_page(conn: sqlite3.Connection, *, offset: int = 0, limit: int = 50, tag_id: int | None = None) -> dict:
+def task_page(conn: sqlite3.Connection, *, offset: int = 0, limit: int = 50, tag_id: int | None = None,
+              focus: int | None = None) -> dict:
     """Every task, for the Tasks page: open tasks in the owner's order (sort_order; new ones
     go last), each followed by its open subtasks, then completed tasks most recently completed first.
 
     Paging counts groups (a task with its subtasks), so a page never splits one.
     With tag_id, an open group is shown whole when the task or any of its open
     subtasks has the tag; a completed task shows when it has the tag itself.
+
+    With focus (a task id), the page is the one holding that task, whatever the
+    offset; `offset` in the answer says which. `focus` echoes the id asked for and `found`
+    says whether it is there (when not, the page is the one the offset asks for).
     """
     rows = _with_tags(conn, [dict(r) for r in conn.execute(f"{VIEW_SQL} ORDER BY t.sort_order, t.id").fetchall()])
     open_rows = [r for r in rows if r["status"] == "open"]
@@ -112,10 +117,16 @@ def task_page(conn: sqlite3.Connection, *, offset: int = 0, limit: int = 50, tag
         open_count_shown = sum(len(g) for g in groups)
     groups += [[r] for r in done]
     offset, limit = max(offset, 0), min(max(limit, 1), 200)
+    at = next((n for n, g in enumerate(groups) if any(t["id"] == focus for t in g)), None) if focus else None
+    if at is not None:
+        offset = at // limit * limit
     return {
         "tasks": [t for g in groups[offset:offset + limit] for t in g],
         "total": len(groups),
         "open": open_count_shown if tag_id is not None else len(open_rows),
+        "offset": offset,
+        "focus": focus,
+        "found": at is not None,
     }
 
 
