@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches theme_color in web/public/manifest.webmanifest. -->
+    <color name="brand">#1F2A44</color>
+    <color name="brass">#D9AD72</color>
+</resources>

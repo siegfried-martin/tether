@@ -1,0 +1,8 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+# Signing keys and their passwords live outside the repo (see README.md).
+*.jks
+*.keystore
+*.p12
