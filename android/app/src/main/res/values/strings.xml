@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tether</string>
+    <string name="widget_tasks_description">Your open tasks; check one off right here</string>
+    <string name="widget_agenda_description">The coming week, every calendar in one list</string>
+    <string name="widget_day_description">One day as a timeline</string>
     <string name="host" translatable="false">tether.marstol.com</string>
     <string name="launch_url" translatable="false">https://tether.marstol.com/</string>
     <string name="asset_statements" translatable="false">

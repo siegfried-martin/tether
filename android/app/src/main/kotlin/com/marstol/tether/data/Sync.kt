@@ -1,0 +1,100 @@
+package com.marstol.tether.data
+
+import android.content.Context
+import android.util.Log
+import androidx.datastore.preferences.core.Preferences
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.appwidget.updateAll
+import androidx.glance.state.PreferencesGlanceStateDefinition
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.marstol.tether.widget.AgendaWidget
+import com.marstol.tether.widget.DayWidget
+import com.marstol.tether.widget.TAG_ID
+import com.marstol.tether.widget.TasksWidget
+import java.io.IOException
+import java.time.LocalDate
+import java.util.concurrent.TimeUnit
+
+/** Fetches widget data in the background and redraws the widgets. */
+object Sync {
+    private const val TAG = "TetherSync"
+    /** The calendar cache runs from yesterday, so the Day widget can step back one day. */
+    const val CALENDAR_DAYS = 15
+
+    private val network = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+
+    /** Every 15 minutes (Android's minimum); unchanged data costs a bodiless 304. */
+    fun schedule(context: Context) {
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "tether-sync", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).setConstraints(network).build())
+    }
+
+    /** Sync as soon as there is a network. */
+    fun now(context: Context) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "tether-sync-now", ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<SyncWorker>().setConstraints(network).build())
+    }
+
+    suspend fun run(context: Context) {
+        try {
+            if (!Tokens.signedIn(context)) throw Api.SignedOut()
+            val start = LocalDate.now().minusDays(1)
+            fetch(context, "/api/widget/calendar?start=$start&days=$CALENDAR_DAYS", Store.CALENDAR)
+            for (tag in taskTags(context)) {
+                fetch(context, "/api/widget/tasks?limit=50" + (tag?.let { "&tag=$it" } ?: ""), Store.tasksName(tag))
+            }
+            Store.setStatus(context, null)
+        } catch (e: Api.SignedOut) {
+            Store.setStatus(context, "signed_out")
+        } catch (e: IOException) {
+            Log.w(TAG, "sync failed: ${e.javaClass.simpleName}")
+            Store.setStatus(context, "offline")
+        }
+        redraw(context)
+    }
+
+    private suspend fun fetch(context: Context, path: String, name: String) {
+        try {
+            val resp = Api.get(context, path, Store.etag(context, name))
+            if (resp.body != null) Store.write(context, name, resp.body, resp.etag)
+        } catch (e: IOException) {
+            // A tag deleted since its widget was set up answers 404: drop that cache so the widget says so.
+            if (e.message == "HTTP 404") Store.write(context, name, "{\"missing\":true}", null) else throw e
+        }
+    }
+
+    /** Every tag filter in use by a Tasks widget, plus null for "all tasks". */
+    private suspend fun taskTags(context: Context): Set<Int?> {
+        val manager = GlanceAppWidgetManager(context)
+        val tags = mutableSetOf<Int?>(null)
+        for (id in manager.getGlanceIds(TasksWidget::class.java)) {
+            val prefs: Preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+            prefs[TAG_ID]?.let { tags.add(it) }
+        }
+        return tags
+    }
+
+    suspend fun redraw(context: Context) {
+        TasksWidget().updateAll(context)
+        AgendaWidget().updateAll(context)
+        DayWidget().updateAll(context)
+    }
+}
+
+class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        Sync.run(applicationContext)
+        return Result.success()
+    }
+}

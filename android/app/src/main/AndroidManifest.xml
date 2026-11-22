@@ -68,6 +68,63 @@
                 android:value="@string/launch_url" />
         </activity>
 
+        <!-- Widget sign-in: OAuth in a Chrome tab; the code returns to the app's own scheme. -->
+        <activity
+            android:name=".SignInActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Tether.Invisible" />
+        <activity
+            android:name=".RedirectActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Tether.Invisible">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.marstol.tether" android:path="/oauth2redirect" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".QuickAddActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Tether.Dialog" />
+        <activity
+            android:name=".TasksConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Tether.Dialog">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- Home-screen widgets. -->
+        <receiver android:name=".widget.TasksWidgetReceiver" android:exported="true" android:label="Tether tasks">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/tasks_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.AgendaWidgetReceiver" android:exported="true" android:label="Tether agenda">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/agenda_widget_info" />
+        </receiver>
+        <receiver android:name=".widget.DayWidgetReceiver" android:exported="true" android:label="Tether day">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/day_widget_info" />
+        </receiver>
+
         <service
             android:name="com.google.androidbrowserhelper.trusted.DelegationService"
             android:exported="true"

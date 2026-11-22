@@ -7,4 +7,16 @@
         <item name="android:navigationBarColor">@color/brand</item>
         <item name="android:windowSplashScreenBackground">@color/brand</item>
     </style>
+
+    <!-- No window of its own: the sign-in hands off to a Chrome tab. -->
+    <style name="Theme.Tether.Invisible" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Dialogs over the home screen, in the system's light or dark theme. -->
+    <style name="Theme.Tether.Dialog" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>
