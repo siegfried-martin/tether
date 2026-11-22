@@ -94,14 +94,18 @@ class AgendaWidget : GlanceAppWidget() {
     @Composable
     private fun EventRow(event: Event) {
         val context = LocalContext.current
-        Row(GlanceModifier.fillMaxWidth().padding(vertical = 3.dp).clickable(openInApp(context, event.url)),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(GlanceModifier.width(4.dp).height(34.dp).cornerRadius(2.dp).background(color(event.color))) {}
-            Spacer(GlanceModifier.width(8.dp))
-            Column(GlanceModifier.defaultWeight()) {
-                Text(event.title, maxLines = 1, style = TextStyle(fontSize = Body, color = GlanceTheme.colors.onSurface))
-                val detail = listOfNotNull(timeLabel(event), event.location?.takeIf { it.isNotBlank() }).joinToString(" · ")
-                Text(detail, maxLines = 1, style = TextStyle(fontSize = Muted, color = GlanceTheme.colors.onSurfaceVariant))
+        // The gap between rows comes from this wrapper: padding and background share one view in Glance.
+        Box(GlanceModifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Row(GlanceModifier.fillMaxWidth().cornerRadius(8.dp).background(tint(event.color))
+                    .clickable(openInApp(context, event.url)),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(GlanceModifier.width(4.dp).height(42.dp).background(color(event.color))) {}
+                Spacer(GlanceModifier.width(8.dp))
+                Column(GlanceModifier.defaultWeight()) {
+                    Text(event.title, maxLines = 1, style = TextStyle(fontSize = Body, color = GlanceTheme.colors.onSurface))
+                    val detail = listOfNotNull(timeLabel(event), event.location?.takeIf { it.isNotBlank() }).joinToString(" · ")
+                    Text(detail, maxLines = 1, style = TextStyle(fontSize = Muted, color = GlanceTheme.colors.onSurfaceVariant))
+                }
             }
         }
     }

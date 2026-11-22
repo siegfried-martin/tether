@@ -20,6 +20,8 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
+import androidx.glance.appwidget.lazy.LazyColumn
+import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
@@ -47,7 +49,6 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -88,15 +89,14 @@ class DayWidget : GlanceAppWidget() {
 
             val events = day?.events ?: emptyList()
             val allDay = events.filter { it.allDay || (it.continued && it.continues) }
-            val shownAllDay = allDay.take(if (allDay.size > 2) 1 else 2)
-            for (e in shownAllDay) Chip(e)
-            if (allDay.size > shownAllDay.size) {
-                Text("+${allDay.size - shownAllDay.size} more all-day", maxLines = 1,
-                     style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant))
+            // Scrolls: all-day events first, then the timeline at a readable hour height.
+            LazyColumn(GlanceModifier.defaultWeight()) {
+                items(allDay, itemId = { -it.id.toLong() }) { Chip(it) }
+                item(itemId = Long.MAX_VALUE) {
+                    Timeline(date, cal.today, events - allDay.toSet(), width = size.width - 24.dp)
+                }
             }
-            val chrome = 20 + 42 + 24 * min(allDay.size, 2) + 18
-            Timeline(date, cal.today, events - allDay.toSet(), width = size.width - 24.dp,
-                     height = max(size.height.value - chrome, 60f).dp)
+            SyncNote()
         }
     }
 
@@ -112,7 +112,7 @@ class DayWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun Timeline(date: LocalDate, today: LocalDate, events: List<Event>, width: Dp, height: Dp) {
+    private fun Timeline(date: LocalDate, today: LocalDate, events: List<Event>, width: Dp) {
         val context = LocalContext.current
         val zone = ZoneId.systemDefault()
         val midnight = date.atStartOfDay(zone)
@@ -123,16 +123,13 @@ class DayWidget : GlanceAppWidget() {
         }.sortedBy { it.from }
         assignLanes(placed)
 
-        // Hours shown: the working day, widened to fit the events; narrowed if that would be too cramped.
+        // Hours shown: 8am to 8pm, widened to fit the day's events. The list starts at the top,
+        // so the first hour shown is the first one that matters.
         val nowMin = if (date == today) Duration.between(midnight, java.time.ZonedDateTime.now(zone)).toMinutes().toInt() else null
-        var startH = min(8, placed.minOfOrNull { it.from / 60 } ?: 8)
-        var endH = max(20, placed.maxOfOrNull { ceil(it.to / 60.0).toInt() } ?: 20)
-        if (height.value / (endH - startH) < 18 && placed.isNotEmpty()) {
-            startH = floor(placed.minOf { it.from } / 60.0).toInt()
-            endH = max(startH + 4, ceil(placed.maxOf { it.to } / 60.0).toInt())
-        }
-        endH = min(endH, 24)
-        val hourH = height.value / (endH - startH)
+        val startH = min(8, placed.minOfOrNull { it.from / 60 } ?: 8)
+        val endH = min(24, max(20, placed.maxOfOrNull { ceil(it.to / 60.0).toInt() } ?: 20))
+        val hourH = HOUR_DP
+        val height = ((endH - startH) * hourH).dp
         val y = { m: Int -> ((m - startH * 60) * hourH / 60f).coerceIn(0f, height.value) }
         val gutter = 34f
         val area = width.value - gutter
@@ -172,6 +169,10 @@ class DayWidget : GlanceAppWidget() {
                 }
             }
         }
+    }
+
+    private companion object {
+        const val HOUR_DP = 48f
     }
 
     @Composable

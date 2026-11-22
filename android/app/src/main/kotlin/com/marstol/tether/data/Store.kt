@@ -54,6 +54,7 @@ data class TaskItem(
     val priority: String?,
     val tags: List<Pair<String, String>>,   // name to color
     val url: String,
+    val emailColor: String?,   // the linked email's account color, if the task came from an email
     val subtasks: List<TaskItem>,
 )
 
@@ -91,6 +92,7 @@ private fun task(o: JSONObject): TaskItem = TaskItem(
     priority = o.str("priority"),
     tags = o.getJSONArray("tags").map { it.getString("name") to it.getString("color") },
     url = o.getString("url"),
+    emailColor = o.optJSONObject("email")?.str("color"),
     subtasks = o.optJSONArray("subtasks")?.map(::task) ?: emptyList(),
 )
 

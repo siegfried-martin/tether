@@ -169,6 +169,11 @@ def test_widget_api_etag(client, monkeypatch):
     assert cal.status_code == 200 and [d["date"] for d in cal.json()["days"]] == [
         "2026-11-15", "2026-11-16", "2026-11-17"]
     assert client.get("/api/widget/calendar?start=nope").status_code == 422
+    # The phone's zone decides the days (the owner may be travelling); a bad zone is refused.
+    london = client.get("/api/widget/calendar?start=2026-11-15&days=1&tz=Europe/London").json()
+    assert london["tz"] == "Europe/London"
+    assert client.get("/api/widget/calendar?tz=Mars/Olympus").status_code == 422
+    assert client.get("/api/widget/tasks?tz=Europe/London").status_code == 200
 
 
 # --------------------------------------------------------------------------- calendar widget

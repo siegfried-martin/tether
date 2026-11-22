@@ -22,7 +22,17 @@ import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
+import androidx.glance.layout.Spacer
+import androidx.glance.layout.height
+import androidx.glance.layout.width
+import androidx.glance.appwidget.cornerRadius
+import androidx.glance.background
+import androidx.glance.text.FontWeight
+import androidx.glance.unit.ColorProvider
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
@@ -88,20 +98,40 @@ class TasksWidget : GlanceAppWidget() {
             verticalAlignment = Alignment.CenterVertically) {
             CheckBox(checked = false, onCheckedChange = actionRunCallback<CompleteTask>(
                 actionParametersOf(CompleteTask.ID to task.id)))
+            if (task.emailColor != null) {
+                // Like the web app: a task from an email carries its account's color.
+                Box(GlanceModifier.width(3.dp).height(30.dp).cornerRadius(2.dp).background(color(task.emailColor))) {}
+                Spacer(GlanceModifier.width(6.dp))
+            }
             Column(GlanceModifier.defaultWeight().clickable(openInApp(context, task.url))) {
                 Text(task.title, maxLines = 2,
                      style = TextStyle(fontSize = Body, color = GlanceTheme.colors.onSurface))
                 val due = dueLabel(task, today)
-                val tags = task.tags.joinToString(" · ") { it.first }
-                val meta = listOfNotNull(due, tags.ifEmpty { null }).joinToString("  ·  ")
-                if (meta.isNotEmpty()) {
-                    Text(meta, maxLines = 1, style = TextStyle(fontSize = Muted,
-                         color = if (task.due == "overdue") GlanceTheme.colors.error
-                                 else if (task.due == "today") GlanceTheme.colors.primary
-                                 else GlanceTheme.colors.onSurfaceVariant))
+                if (due != null || task.tags.isNotEmpty()) {
+                    Row(GlanceModifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (due != null) {
+                            Text(due, maxLines = 1, modifier = GlanceModifier.padding(end = 6.dp),
+                                 style = TextStyle(fontSize = Muted, fontWeight = FontWeight.Medium,
+                                     color = if (task.due == "overdue") GlanceTheme.colors.error
+                                             else if (task.due == "today") GlanceTheme.colors.primary
+                                             else GlanceTheme.colors.onSurfaceVariant))
+                        }
+                        for ((name, hex) in task.tags.take(3)) {
+                            TagChip(name, hex)
+                            Spacer(GlanceModifier.width(4.dp))
+                        }
+                    }
                 }
             }
         }
+    }
+
+    @Composable
+    private fun TagChip(name: String, hex: String) {
+        Text(name, maxLines = 1,
+             modifier = GlanceModifier.cornerRadius(8.dp).background(color(hex))
+                 .padding(horizontal = 6.dp, vertical = 1.dp),
+             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, color = ColorProvider(Color.White)))
     }
 
     private fun dueLabel(task: TaskItem, today: LocalDate): String? {

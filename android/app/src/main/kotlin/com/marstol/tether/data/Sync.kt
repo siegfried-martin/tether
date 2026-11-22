@@ -1,6 +1,9 @@
 package com.marstol.tether.data
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
@@ -22,6 +25,7 @@ import com.marstol.tether.widget.TAG_ID
 import com.marstol.tether.widget.TasksWidget
 import java.io.IOException
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 /** Fetches widget data in the background and redraws the widgets. */
@@ -49,10 +53,12 @@ object Sync {
     suspend fun run(context: Context) {
         try {
             if (!Tokens.signedIn(context)) throw Api.SignedOut()
+            // Days follow the phone's zone, so the widgets travel with the owner.
+            val tz = Uri.encode(ZoneId.systemDefault().id)
             val start = LocalDate.now().minusDays(1)
-            fetch(context, "/api/widget/calendar?start=$start&days=$CALENDAR_DAYS", Store.CALENDAR)
+            fetch(context, "/api/widget/calendar?start=$start&days=$CALENDAR_DAYS&tz=$tz", Store.CALENDAR)
             for (tag in taskTags(context)) {
-                fetch(context, "/api/widget/tasks?limit=50" + (tag?.let { "&tag=$it" } ?: ""), Store.tasksName(tag))
+                fetch(context, "/api/widget/tasks?limit=50&tz=$tz" + (tag?.let { "&tag=$it" } ?: ""), Store.tasksName(tag))
             }
             Store.setStatus(context, null)
         } catch (e: Api.SignedOut) {
@@ -89,6 +95,13 @@ object Sync {
         TasksWidget().updateAll(context)
         AgendaWidget().updateAll(context)
         DayWidget().updateAll(context)
+    }
+}
+
+/** A new time zone (landing somewhere) or a clock change: redo the days at once. */
+class ClockChangeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        Sync.now(context)
     }
 }
 

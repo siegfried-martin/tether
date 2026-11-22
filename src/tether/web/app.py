@@ -12,6 +12,8 @@ import json
 import logging
 import secrets
 import sqlite3
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -464,18 +466,30 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             return Response(status_code=304, headers=headers)
         return Response(body, media_type="application/json", headers=headers)
 
+    def widget_zone(tz: str | None) -> ZoneInfo:
+        """The phone's time zone when it sends one (the owner may be travelling), else the owner's."""
+        if not tz:
+            return settings.tz
+        try:
+            return ZoneInfo(tz)
+        except (ValueError, ZoneInfoNotFoundError):
+            raise HTTPException(422, f"unknown time zone {tz!r}") from None
+
     @app.get("/api/widget/tasks")
-    async def widget_tasks(request: Request, tag: int | None = None, limit: int = 50, _: str = Depends(require_user),
-                           conn: sqlite3.Connection = Depends(conn_dep)):
+    async def widget_tasks(request: Request, tag: int | None = None, limit: int = 50, tz: str | None = None,
+                           _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        today = datetime.now(widget_zone(tz)).date()
         with user_errors():
-            return etagged(request, widget.widget_tasks(conn, settings.today(), tag_id=tag, limit=limit))
+            return etagged(request, widget.widget_tasks(conn, today, tag_id=tag, limit=limit))
 
     @app.get("/api/widget/calendar")
-    async def widget_calendar(request: Request, start: str | None = None, days: int = 7,
+    async def widget_calendar(request: Request, start: str | None = None, days: int = 7, tz: str | None = None,
                               _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        zone = widget_zone(tz)
+        today = datetime.now(zone).date()
         with user_errors():
-            first, _last = calendar.parse_range(start, None, settings.today())
-            return etagged(request, widget.widget_calendar(conn, first, days, settings.tz, settings.today()))
+            first, _last = calendar.parse_range(start, None, today)
+            return etagged(request, widget.widget_calendar(conn, first, days, zone, today))
 
     # --------------------------------------------------------- connections
 

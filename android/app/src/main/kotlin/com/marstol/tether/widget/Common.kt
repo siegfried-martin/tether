@@ -60,8 +60,13 @@ fun openInApp(context: Context, path: String): Action = actionStartActivity(
         .setClassName(context.packageName, LAUNCHER)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
-fun color(hex: String?, fallback: Color = Color(0xFF8A8F98)): ColorProvider =
-    ColorProvider(hex?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() } ?: fallback)
+fun parse(hex: String?): Color? = hex?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+
+fun color(hex: String?, fallback: Color = Color(0xFF8A8F98)): ColorProvider = ColorProvider(parse(hex) ?: fallback)
+
+/** An account or tag color, see-through, as a row's tint. */
+fun tint(hex: String?, alpha: Float = 0.22f): ColorProvider =
+    ColorProvider((parse(hex) ?: Color(0xFF8A8F98)).copy(alpha = alpha))
 
 val Muted = 12.sp
 val Body = 14.sp
