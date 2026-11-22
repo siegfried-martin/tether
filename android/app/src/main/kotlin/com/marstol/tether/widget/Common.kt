@@ -159,7 +159,7 @@ fun refreshIcon(): Int =
 
 class RefreshAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        Sync.run(context)
+        Sync.now(context, waitForNetwork = false)
     }
 }
 

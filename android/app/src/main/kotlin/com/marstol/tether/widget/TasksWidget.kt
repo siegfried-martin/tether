@@ -40,12 +40,11 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.marstol.tether.QuickAddActivity
 import com.marstol.tether.R
-import com.marstol.tether.data.Api
+import com.marstol.tether.data.ActionWorker
 import com.marstol.tether.data.Store
 import com.marstol.tether.data.Sync
 import com.marstol.tether.data.TaskItem
 import com.marstol.tether.data.parseTasks
-import java.io.IOException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -164,16 +163,7 @@ class CompleteTask : ActionCallback {
         val id = parameters[ID] ?: return
         Pending.add(context, id)
         Sync.redraw(context)
-        try {
-            Api.post(context, "/api/tasks/$id/complete")
-        } catch (e: Api.SignedOut) {
-            // shown by the widget
-        } catch (e: IOException) {
-            // offline or refused: the task shows again
-        }
-        Sync.run(context)
-        Pending.remove(context, id)
-        Sync.redraw(context)
+        Sync.act(context, ActionWorker.COMPLETE, id)
     }
 
     companion object {

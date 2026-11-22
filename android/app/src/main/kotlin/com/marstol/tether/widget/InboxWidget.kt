@@ -34,12 +34,11 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.compose.ui.unit.sp
 import com.marstol.tether.R
-import com.marstol.tether.data.Api
+import com.marstol.tether.data.ActionWorker
 import com.marstol.tether.data.InboxItem
 import com.marstol.tether.data.Store
 import com.marstol.tether.data.Sync
 import com.marstol.tether.data.parseInbox
-import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -134,16 +133,7 @@ class ArchiveItem : ActionCallback {
         val id = parameters[ID] ?: return
         Archiving.add(context, id)
         Sync.redraw(context)
-        try {
-            Api.post(context, "/api/items/$id/archive")
-        } catch (e: Api.SignedOut) {
-            // shown by the widget
-        } catch (e: IOException) {
-            // offline or refused: the email shows again
-        }
-        Sync.run(context)
-        Archiving.remove(context, id)
-        Sync.redraw(context)
+        Sync.act(context, ActionWorker.ARCHIVE, id)
     }
 
     companion object {

@@ -16,11 +16,15 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.workDataOf
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.marstol.tether.widget.ACCOUNT
 import com.marstol.tether.widget.AgendaWidget
+import com.marstol.tether.widget.Archiving
+import com.marstol.tether.widget.Pending
 import com.marstol.tether.widget.InboxWidget
 import com.marstol.tether.widget.DATA_VERSION
 import com.marstol.tether.widget.DayWidget
@@ -47,11 +51,29 @@ object Sync {
             PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).setConstraints(network).build())
     }
 
-    /** Sync as soon as there is a network. */
-    fun now(context: Context) {
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "tether-sync-now", ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<SyncWorker>().setConstraints(network).build())
+    /**
+     * Sync as soon as there is a network. A tap on refresh syncs at once even offline,
+     * so the widgets can say they are offline.
+     */
+    fun now(context: Context, waitForNetwork: Boolean = true) {
+        val work = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        if (waitForNetwork) work.setConstraints(network)
+        WorkManager.getInstance(context).enqueueUniqueWork("tether-sync-now", ExistingWorkPolicy.REPLACE, work.build())
+    }
+
+    /**
+     * A widget button's server call (complete a task, archive an email), then a sync. Run as
+     * background work: a widget tap must return at once, and Android may freeze or kill the
+     * app as soon as it does.
+     */
+    fun act(context: Context, kind: String, id: Int) {
+        WorkManager.getInstance(context).enqueue(
+            OneTimeWorkRequestBuilder<ActionWorker>()
+                .setInputData(workDataOf(ActionWorker.KIND to kind, ActionWorker.ID to id))
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .setConstraints(network)
+                .build())
     }
 
     suspend fun run(context: Context) {
@@ -107,10 +129,11 @@ object Sync {
 
     suspend fun redraw(context: Context) {
         WidgetData.version.value += 1
-        Log.d(TAG, "redraw v=${WidgetData.version.value}")
         val manager = GlanceAppWidgetManager(context)
         for (widget in listOf(TasksWidget(), InboxWidget(), AgendaWidget(), DayWidget())) {
-            for (id in manager.getGlanceIds(widget.javaClass)) {
+            val ids = manager.getGlanceIds(widget.javaClass)
+            Log.d(TAG, "redraw v=${WidgetData.version.value} ${widget.javaClass.simpleName} x${ids.size}")
+            for (id in ids) {
                 updateAppWidgetState(context, id) { it[DATA_VERSION] = (it[DATA_VERSION] ?: 0) + 1 }
                 widget.update(context, id)
             }
@@ -122,6 +145,37 @@ object Sync {
 class ClockChangeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Sync.now(context)
+    }
+}
+
+class ActionWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val id = inputData.getInt(ID, -1)
+        val kind = inputData.getString(KIND)
+        val (path, pending) = when (kind) {
+            COMPLETE -> "/api/tasks/$id/complete" to Pending
+            ARCHIVE -> "/api/items/$id/archive" to Archiving
+            else -> return Result.failure()
+        }
+        try {
+            Api.post(applicationContext, path)
+        } catch (e: Api.SignedOut) {
+            // shown by the widgets
+        } catch (e: IOException) {
+            // offline or refused: the row shows again
+            Log.w("TetherSync", "$kind failed: ${e.javaClass.simpleName}")
+        }
+        Sync.run(applicationContext)
+        pending.remove(applicationContext, id)
+        Sync.redraw(applicationContext)
+        return Result.success()
+    }
+
+    companion object {
+        const val KIND = "kind"
+        const val ID = "id"
+        const val COMPLETE = "complete"
+        const val ARCHIVE = "archive"
     }
 }
 
