@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tether</string>
+    <string name="widget_inbox_description">Mail from all your accounts; archive right here</string>
     <string name="widget_tasks_description">Your open tasks; check one off right here</string>
     <string name="widget_agenda_description">The coming week, every calendar in one list</string>
     <string name="widget_day_description">One day as a timeline</string>

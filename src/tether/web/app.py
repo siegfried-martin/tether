@@ -125,7 +125,8 @@ class TaskMove(BaseModel):
     after: int | None = None
 
 
-USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError)
+USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError,
+               widget.WidgetError)
 
 
 @contextlib.contextmanager
@@ -481,6 +482,12 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         today = datetime.now(widget_zone(tz)).date()
         with user_errors():
             return etagged(request, widget.widget_tasks(conn, today, tag_id=tag, limit=limit))
+
+    @app.get("/api/widget/inbox")
+    async def widget_inbox(request: Request, account: str | None = None, limit: int = widget.MAX_ITEMS,
+                           _: str = Depends(require_user), conn: sqlite3.Connection = Depends(conn_dep)):
+        with user_errors():
+            return etagged(request, widget.widget_inbox(conn, account=account, limit=limit))
 
     @app.get("/api/widget/calendar")
     async def widget_calendar(request: Request, start: str | None = None, days: int = 7, tz: str | None = None,

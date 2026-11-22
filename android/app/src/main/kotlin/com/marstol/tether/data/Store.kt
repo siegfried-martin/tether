@@ -39,6 +39,9 @@ object Store {
         context.getSharedPreferences("sync", Context.MODE_PRIVATE).getString("error", null)
 
     fun tasksName(tagId: Int?) = if (tagId == null) "tasks" else "tasks-$tagId"
+    /** A file name for one account's inbox: hex of the label, which may hold any character. */
+    fun inboxName(account: String?) =
+        if (account == null) "inbox" else "inbox-" + account.toByteArray().joinToString("") { "%02x".format(it) }
     const val CALENDAR = "calendar"
 }
 
@@ -59,6 +62,22 @@ data class TaskItem(
 )
 
 data class TaskList(val today: String, val count: Int, val tasks: List<TaskItem>, val tag: Tag?, val tags: List<Tag>)
+
+data class InboxItem(
+    val id: Int,
+    val sender: String,
+    val title: String,
+    val snippet: String?,
+    val at: String,
+    val out: Boolean,          // the last message was the owner's
+    val account: String,
+    val color: String?,
+    val task: Boolean,         // has an open task
+    val high: Boolean,
+    val url: String,
+)
+
+data class Inbox(val count: Int, val items: List<InboxItem>, val accounts: List<Pair<String, String?>>)
 
 data class Event(
     val id: Int,
@@ -104,6 +123,29 @@ fun parseTasks(body: String): TaskList {
         tasks = o.getJSONArray("tasks").map(::task),
         tag = o.optJSONObject("tag")?.let(::tag),
         tags = o.getJSONArray("tags").map(::tag),
+    )
+}
+
+fun parseInbox(body: String): Inbox {
+    val o = JSONObject(body)
+    return Inbox(
+        count = o.getInt("count"),
+        items = o.getJSONArray("items").map { i ->
+            InboxItem(
+                id = i.getInt("id"),
+                sender = i.getString("sender"),
+                title = i.str("title") ?: "(no subject)",
+                snippet = i.str("snippet"),
+                at = i.getString("at"),
+                out = i.getBoolean("out"),
+                account = i.getString("account"),
+                color = i.str("color"),
+                task = i.getBoolean("task"),
+                high = i.getBoolean("high"),
+                url = i.getString("url"),
+            )
+        },
+        accounts = o.getJSONArray("accounts").map { it.getString("label") to it.str("color") },
     )
 }
 

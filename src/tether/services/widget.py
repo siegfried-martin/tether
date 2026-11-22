@@ -1,4 +1,4 @@
-"""Compact data for the Android home-screen widgets: Tasks, Agenda and Day.
+"""Compact data for the Android home-screen widgets: Tasks, Inbox, Agenda and Day.
 
 The widgets poll these every 15-30 minutes, so each answer is small and only
 what a widget draws. Every task and event carries `url`, a path in the web app
@@ -7,15 +7,62 @@ that opens it there (the app prefixes the site's address).
 
 import sqlite3
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from tether.services import calendar, tasks
+from tether.services import accounts, calendar, items, tasks
 
 MAX_TASKS = 100
+MAX_ITEMS = 50          # the web inbox's page size, so every email the widget shows is on page 1 there
+SNIPPET_CAP = 160
 MAX_DAYS = 14
 # Events that started this many days before the first day are still looked at,
 # so a multi-day event already under way shows on the days it covers.
 LOOKBACK_DAYS = 7
+
+
+class WidgetError(ValueError):
+    """A widget asked for something that is gone. The message is safe to show."""
+
+    def __init__(self, message: str, *, status: int = 404):
+        super().__init__(message)
+        self.status = status
+
+
+# --------------------------------------------------------------------------- inbox
+
+
+def widget_inbox(conn: sqlite3.Connection, *, account: str | None = None, limit: int = MAX_ITEMS) -> dict:
+    """Open inbox items, newest activity first, from every account or one.
+
+    Each item's url opens it in the web inbox (filtered the same way), where it
+    is on the first page because the widget shows at most one page.
+    """
+    limit = min(max(int(limit), 1), MAX_ITEMS)
+    every = accounts.list_accounts(conn)
+    chosen = next((a for a in every if a["label"] == account), None) if account else None
+    if account and chosen is None:
+        raise WidgetError(f"no account {account!r}")
+    filt = f"&account={quote(account)}" if account else ""
+    rows = items.list_items(conn, account=account, state="open", limit=limit)
+    return {
+        "count": items.count_items(conn, account=account, state="open"),
+        "account": {"label": chosen["label"], "color": chosen["color"]} if chosen else None,
+        "accounts": [{"label": a["label"], "color": a["color"]} for a in every],
+        "items": [{
+            "id": i["id"],
+            "sender": i["sender"] or i["account"],
+            "title": i["title"],
+            "snippet": (i["snippet"] or "")[:SNIPPET_CAP] or None,
+            "at": i["last_activity_at"],
+            "out": i["last_direction"] == "out",
+            "account": i["account"],
+            "color": i["account_color"],
+            "task": i["open_tasks"] > 0,
+            "high": i["priority"] == "high",
+            "url": f"/inbox?item={i['id']}{filt}",
+        } for i in rows],
+    }
 
 
 # --------------------------------------------------------------------------- tasks

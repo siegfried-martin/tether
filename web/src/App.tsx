@@ -122,11 +122,29 @@ function Home({ loc }: { loc: Location }) {
   const accountList = usePolling<Account[]>('/api/accounts')
   const query = new URLSearchParams({ state: tab, limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) })
   if (account) query.set('account', account)
-  const list = usePolling<ItemPage>(`/api/items?${query}`)
+  const listPath = `/api/items?${query}`
+  const list = usePolling<ItemPage>(listPath)
+  // ?item=ID (a link from the phone widget) opens that email. The widget shows one page at most,
+  // newest first, so the email is on the first page of the same filter.
+  const focus = Number(loc.params.get('item')) || null
   // Rows moved out of this view, hidden at once while the server catches up.
   const [moved, setMoved] = useState<Set<number>>(new Set())
   const [reading, setReading] = useState<number | null>(null)
   const [toast, setToast] = useToast()
+
+  useEffect(() => {
+    if (!focus || list.loaded !== listPath || !list.data) return
+    if (list.data.items.some((i) => i.id === focus)) {
+      setReading(focus)
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(`li[data-item="${focus}"]`)
+        el?.scrollIntoView({ block: 'start' })
+      })
+    } else {
+      setToast({ text: "That email isn't in the inbox any more." })
+    }
+    navigate(withParams({ item: null }), { replace: true })
+  }, [focus, list.loaded, list.data])
 
   const refresh = () => { list.reload(); overview.reload() }
   const hide = (id: number, on: boolean) =>
@@ -281,7 +299,7 @@ function ItemRow({ item, open, onToggle, onAction, onTask }: {
 }) {
   const archive = item.state === 'open'
   return (
-    <li className={`item-row${open ? ' open' : ''}`} style={accountStyle(item.account_color)}>
+    <li className={`item-row${open ? ' open' : ''}`} data-item={item.id} style={accountStyle(item.account_color)}>
       <div className="item-line">
         <button className="item" onClick={onToggle} aria-expanded={open} title={item.account}>
           <span className="item-main">

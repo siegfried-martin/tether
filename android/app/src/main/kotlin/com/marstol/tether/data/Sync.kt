@@ -19,7 +19,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.marstol.tether.widget.ACCOUNT
 import com.marstol.tether.widget.AgendaWidget
+import com.marstol.tether.widget.InboxWidget
 import com.marstol.tether.widget.DATA_VERSION
 import com.marstol.tether.widget.DayWidget
 import com.marstol.tether.widget.TAG_ID
@@ -62,6 +64,10 @@ object Sync {
             for (tag in taskTags(context)) {
                 fetch(context, "/api/widget/tasks?limit=50&tz=$tz" + (tag?.let { "&tag=$it" } ?: ""), Store.tasksName(tag))
             }
+            for (account in inboxAccounts(context)) {
+                fetch(context, "/api/widget/inbox" + (account?.let { "?account=" + Uri.encode(it) } ?: ""),
+                      Store.inboxName(account))
+            }
             Store.setStatus(context, null)
         } catch (e: Api.SignedOut) {
             Store.setStatus(context, "signed_out")
@@ -93,11 +99,17 @@ object Sync {
         return tags
     }
 
+    /** Every account filter in use by an Inbox widget (null for all), or none without an Inbox widget. */
+    private suspend fun inboxAccounts(context: Context): Set<String?> {
+        val ids = GlanceAppWidgetManager(context).getGlanceIds(InboxWidget::class.java)
+        return ids.map { getAppWidgetState(context, PreferencesGlanceStateDefinition, it)[ACCOUNT] }.toSet()
+    }
+
     suspend fun redraw(context: Context) {
         WidgetData.version.value += 1
         Log.d(TAG, "redraw v=${WidgetData.version.value}")
         val manager = GlanceAppWidgetManager(context)
-        for (widget in listOf(TasksWidget(), AgendaWidget(), DayWidget())) {
+        for (widget in listOf(TasksWidget(), InboxWidget(), AgendaWidget(), DayWidget())) {
             for (id in manager.getGlanceIds(widget.javaClass)) {
                 updateAppWidgetState(context, id) { it[DATA_VERSION] = (it[DATA_VERSION] ?: 0) + 1 }
                 widget.update(context, id)

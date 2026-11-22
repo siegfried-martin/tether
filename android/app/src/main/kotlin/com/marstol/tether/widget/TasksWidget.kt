@@ -147,14 +147,17 @@ class TasksWidget : GlanceAppWidget() {
     }
 }
 
-/** Tasks checked off in the widget, hidden at once while the server catches up. */
-object Pending {
-    private fun prefs(context: Context) = context.getSharedPreferences("pending", Context.MODE_PRIVATE)
+/** Ids acted on in a widget, hidden at once while the server catches up. */
+open class PendingSet(private val file: String) {
+    private fun prefs(context: Context) = context.getSharedPreferences(file, Context.MODE_PRIVATE)
     fun ids(context: Context): Set<Int> =
         prefs(context).getStringSet("done", emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
     fun add(context: Context, id: Int) = prefs(context).edit().putStringSet("done", ids(context).map { "$it" }.toSet() + "$id").apply()
     fun remove(context: Context, id: Int) = prefs(context).edit().putStringSet("done", (ids(context) - id).map { "$it" }.toSet()).apply()
 }
+
+/** Tasks checked off in the widget. */
+object Pending : PendingSet("pending")
 
 class CompleteTask : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {

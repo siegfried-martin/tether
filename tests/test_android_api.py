@@ -10,7 +10,7 @@ from test_mcp import connect, pkce, rpc
 from test_web import client, login, settings  # noqa: F401  (fixtures)
 
 from tether.connectors.events import Instance
-from tether.services import calendar, mcp_auth, tasks, widget
+from tether.services import calendar, items, mcp_auth, tasks, widget
 
 APP_REDIRECT = "com.marstol.tether:/oauth2redirect"
 TODAY = date(2026, 11, 15)
@@ -153,6 +153,34 @@ def test_widget_tasks(conn):
     assert [t["title"] for t in widget.widget_tasks(conn, TODAY, limit=1)["tasks"]] == ["B"]
     with pytest.raises(tasks.TaskError):
         widget.widget_tasks(conn, TODAY, tag_id=999)
+
+
+def test_widget_inbox(conn):
+    home = conn.execute("INSERT INTO account (kind, label, color) VALUES ('gmail', 'Home', '#d33')").lastrowid
+    work = conn.execute("INSERT INTO account (kind, label, color) VALUES ('digest', 'Work & Co', '#33d')").lastrowid
+    def put(acct, ext, when, **fields):
+        return items.upsert_item(conn, account_id=acct, external_id=ext, kind="email", fields={
+            "title": ext, "last_activity_at": when, "last_direction": "in", **fields}).id
+    old = put(home, "old", "2026-11-14T09:00:00Z", sender="Ann", snippet="x" * 500)
+    new = put(work, "new", "2026-11-15T09:00:00Z", last_direction="out", priority="high")
+    gone = put(home, "gone", "2026-11-15T10:00:00Z")
+    items.set_state(conn, gone, "archived")
+    tasks.create_task(conn, title="Reply", item_id=old)
+
+    out = widget.widget_inbox(conn)
+    assert [i["id"] for i in out["items"]] == [new, old] and out["count"] == 2 and out["account"] is None
+    first, second = out["items"]
+    assert first["sender"] == "Work & Co", "no sender: the account's name"
+    assert first["out"] and first["high"] and first["color"] == "#33d" and first["snippet"] is None
+    assert second["task"] and len(second["snippet"]) == widget.SNIPPET_CAP and second["url"] == f"/inbox?item={old}"
+    assert {a["label"] for a in out["accounts"]} >= {"Home", "Work & Co"}
+
+    one = widget.widget_inbox(conn, account="Work & Co")
+    assert [i["id"] for i in one["items"]] == [new] and one["account"]["color"] == "#33d"
+    assert one["items"][0]["url"] == f"/inbox?item={new}&account=Work%20%26%20Co"
+    assert len(widget.widget_inbox(conn, limit=1)["items"]) == 1
+    with pytest.raises(widget.WidgetError):
+        widget.widget_inbox(conn, account="Nope")
 
 
 def test_widget_api_etag(client, monkeypatch):
