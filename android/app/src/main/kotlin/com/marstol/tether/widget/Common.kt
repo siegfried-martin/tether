@@ -41,6 +41,7 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import androidx.glance.color.ColorProvider as DayNightColorProvider
 import com.marstol.tether.R
 import com.marstol.tether.SignInActivity
 import com.marstol.tether.data.Api
@@ -73,13 +74,16 @@ fun tint(hex: String?, alpha: Float = 0.22f): ColorProvider =
 val Muted = 12.sp
 val Body = 14.sp
 
-/** The rounded widget surface, in the wallpaper's colors. */
+/** Widget background: near-black in dark mode (darker than the wallpaper-tinted default), near-white in light. */
+val Surface = DayNightColorProvider(day = Color(0xFFF8F9FB), night = Color(0xFF0B0D10))
+
+/** The rounded widget surface; text and accents still follow the wallpaper's colors. */
 @Composable
 fun WidgetFrame(content: @Composable ColumnScope.() -> Unit) {
     GlanceTheme {
         Column(
             GlanceModifier.fillMaxSize().appWidgetBackground().cornerRadius(20.dp)
-                .background(GlanceTheme.colors.widgetBackground).padding(horizontal = 12.dp, vertical = 10.dp),
+                .background(Surface).padding(horizontal = 12.dp, vertical = 10.dp),
         ) { content() }
     }
 }
