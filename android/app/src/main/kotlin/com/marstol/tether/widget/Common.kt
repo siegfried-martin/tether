@@ -143,7 +143,6 @@ fun Placeholder(context: Context, empty: String) {
 fun SyncNote() {
     val context = LocalContext.current
     val note = when (Store.status(context)) {
-        "offline" -> "Couldn't reach Tether · showing saved data"
         "signed_out" -> "Signed out · open a widget's Sign in"
         else -> return
     }
@@ -151,7 +150,10 @@ fun SyncNote() {
          style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant))
 }
 
-val refreshIcon = R.drawable.ic_refresh
+/** Refresh, or a crossed-out cloud when the last sync couldn't reach Tether (tap still retries). */
+@Composable
+fun refreshIcon(): Int =
+    if (Store.status(LocalContext.current) == "offline") R.drawable.ic_cloud_off else R.drawable.ic_refresh
 
 class RefreshAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {

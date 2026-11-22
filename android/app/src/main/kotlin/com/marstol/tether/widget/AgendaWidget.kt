@@ -61,7 +61,7 @@ class AgendaWidget : GlanceAppWidget() {
         val context = LocalContext.current
         val cal = Store.read(context, Store.CALENDAR)?.let { runCatching { parseCalendar(it) }.getOrNull() }
         WidgetFrame {
-            Header("Agenda", openInApp(context, "/calendar/schedule"), refreshIcon to actionRunCallback<RefreshAction>())
+            Header("Agenda", openInApp(context, "/calendar/schedule"), refreshIcon() to actionRunCallback<RefreshAction>())
             if (cal == null) {
                 Placeholder(context, "Loading calendar…")
                 return@WidgetFrame

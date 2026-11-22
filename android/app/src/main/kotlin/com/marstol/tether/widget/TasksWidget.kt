@@ -72,7 +72,7 @@ class TasksWidget : GlanceAppWidget() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
         WidgetFrame {
             Header(if (list != null) "$title  ${list.count}" else title, openInApp(context, page),
-                   R.drawable.ic_add to add, refreshIcon to actionRunCallback<RefreshAction>())
+                   R.drawable.ic_add to add, refreshIcon() to actionRunCallback<RefreshAction>())
             when {
                 body != null && list == null -> Placeholder(context, "That tag is gone. Long-press the widget to pick another.")
                 list == null -> Placeholder(context, "Loading tasks…")

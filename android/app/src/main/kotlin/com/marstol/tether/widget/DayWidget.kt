@@ -74,7 +74,7 @@ class DayWidget : GlanceAppWidget() {
         val cal = Store.read(context, Store.CALENDAR)?.let { runCatching { parseCalendar(it) }.getOrNull() }
         WidgetFrame {
             if (cal == null) {
-                Header("Day", openInApp(context, "/calendar/day"), refreshIcon to actionRunCallback<RefreshAction>())
+                Header("Day", openInApp(context, "/calendar/day"), refreshIcon() to actionRunCallback<RefreshAction>())
                 Placeholder(context, "Loading calendar…")
                 return@WidgetFrame
             }
@@ -87,7 +87,7 @@ class DayWidget : GlanceAppWidget() {
                 if (offset != 0) add(R.drawable.ic_today to shift(0))
                 if (date > first) add(R.drawable.ic_chevron_left to shift(-1))
                 if (date < last) add(R.drawable.ic_chevron_right to shift(1))
-                add(refreshIcon to actionRunCallback<RefreshAction>())
+                add(refreshIcon() to actionRunCallback<RefreshAction>())
             }
             Header(dayName(date, cal.today), openInApp(context, "/calendar/day?date=$date"), *buttons.toTypedArray())
 
@@ -95,7 +95,12 @@ class DayWidget : GlanceAppWidget() {
             val allDay = events.filter { it.allDay || (it.continued && it.continues) }
             // Scrolls: all-day events first, then the timeline at a readable hour height.
             LazyColumn(GlanceModifier.defaultWeight()) {
-                items(allDay, itemId = { -it.id.toLong() }) { Chip(it) }
+                // At most five lines: past five, the fifth says how many more.
+                val shown = if (allDay.size > MAX_ALL_DAY) allDay.take(MAX_ALL_DAY - 1) else allDay
+                items(shown, itemId = { -it.id.toLong() }) { Chip(it) }
+                if (allDay.size > shown.size) item(itemId = Long.MIN_VALUE) {
+                    MoreChip(allDay.size - shown.size, openInApp(context, "/calendar/day?date=$date"))
+                }
                 item(itemId = Long.MAX_VALUE) {
                     Timeline(date, cal.today, events - allDay.toSet(), width = size.width - 24.dp)
                 }
@@ -112,6 +117,16 @@ class DayWidget : GlanceAppWidget() {
                  modifier = GlanceModifier.fillMaxWidth().cornerRadius(6.dp).background(color(e.color))
                      .padding(horizontal = 8.dp, vertical = 3.dp),
                  style = TextStyle(fontSize = Muted, fontWeight = FontWeight.Medium, color = ColorProvider(Color.White)))
+        }
+    }
+
+    @Composable
+    private fun MoreChip(more: Int, open: androidx.glance.action.Action) {
+        Box(GlanceModifier.fillMaxWidth().padding(bottom = 2.dp).clickable(open)) {
+            Text("+$more more all-day", maxLines = 1,
+                 modifier = GlanceModifier.fillMaxWidth().cornerRadius(6.dp).background(GlanceTheme.colors.surfaceVariant)
+                     .padding(horizontal = 8.dp, vertical = 3.dp),
+                 style = TextStyle(fontSize = Muted, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurfaceVariant))
         }
     }
 
@@ -177,6 +192,7 @@ class DayWidget : GlanceAppWidget() {
 
     private companion object {
         const val HOUR_DP = 48f
+        const val MAX_ALL_DAY = 5
     }
 
     @Composable
