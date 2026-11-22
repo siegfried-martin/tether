@@ -51,6 +51,8 @@ import com.marstol.tether.data.Tokens
 /** Per-widget state: the Tasks widget's tag filter, and the Day widget's day (0 = today). */
 val TAG_ID = intPreferencesKey("tag_id")
 val DAY_OFFSET = intPreferencesKey("day_offset")
+/** Bumped on every sync: widgets read their data from files, so this is what makes them redraw. */
+val DATA_VERSION = intPreferencesKey("data_version")
 
 private const val LAUNCHER = "com.google.androidbrowserhelper.trusted.LauncherActivity"
 

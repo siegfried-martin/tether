@@ -8,7 +8,7 @@ import android.util.Log
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
-import androidx.glance.appwidget.updateAll
+import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -20,6 +20,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.marstol.tether.widget.AgendaWidget
+import com.marstol.tether.widget.DATA_VERSION
 import com.marstol.tether.widget.DayWidget
 import com.marstol.tether.widget.TAG_ID
 import com.marstol.tether.widget.TasksWidget
@@ -92,9 +93,13 @@ object Sync {
     }
 
     suspend fun redraw(context: Context) {
-        TasksWidget().updateAll(context)
-        AgendaWidget().updateAll(context)
-        DayWidget().updateAll(context)
+        val manager = GlanceAppWidgetManager(context)
+        for (widget in listOf(TasksWidget(), AgendaWidget(), DayWidget())) {
+            for (id in manager.getGlanceIds(widget.javaClass)) {
+                updateAppWidgetState(context, id) { it[DATA_VERSION] = (it[DATA_VERSION] ?: 0) + 1 }
+                widget.update(context, id)
+            }
+        }
     }
 }
 

@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
+import androidx.glance.currentState
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.LocalContext
@@ -40,7 +42,7 @@ import java.time.format.FormatStyle
 /** The coming week, day by day: today always, other days when they have something on. */
 class AgendaWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        provideContent { Content() }
+        provideContent { Content(currentState<Preferences>()[DATA_VERSION] ?: 0) }
     }
 
     private sealed interface Line {
@@ -54,7 +56,8 @@ class AgendaWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun Content() {
+    @Suppress("UNUSED_PARAMETER")   // version: a new value means new data on disk
+    private fun Content(version: Int) {
         val context = LocalContext.current
         val cal = Store.read(context, Store.CALENDAR)?.let { runCatching { parseCalendar(it) }.getOrNull() }
         WidgetFrame {

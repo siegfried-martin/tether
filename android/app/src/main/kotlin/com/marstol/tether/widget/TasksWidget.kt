@@ -53,13 +53,14 @@ import java.time.format.DateTimeFormatter
 class TasksWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            val tagId = currentState<Preferences>()[TAG_ID]
-            Content(tagId)
+            val state = currentState<Preferences>()
+            Content(state[TAG_ID], state[DATA_VERSION] ?: 0)
         }
     }
 
     @Composable
-    private fun Content(tagId: Int?) {
+    @Suppress("UNUSED_PARAMETER")   // version: a new value means new data on disk
+    private fun Content(tagId: Int?, version: Int) {
         val context = LocalContext.current
         val body = Store.read(context, Store.tasksName(tagId))
         val list = body?.takeUnless { it.contains("\"missing\"") }?.let { runCatching { parseTasks(it) }.getOrNull() }

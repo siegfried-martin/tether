@@ -57,14 +57,18 @@ class DayWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        provideContent { Content(currentState<Preferences>()[DAY_OFFSET] ?: 0) }
+        provideContent {
+            val state = currentState<Preferences>()
+            Content(state[DAY_OFFSET] ?: 0, state[DATA_VERSION] ?: 0)
+        }
     }
 
     /** A timed event placed on the grid: minutes from midnight, and its lane among overlapping events. */
     private data class Placed(val event: Event, val from: Int, val to: Int, var lane: Int = 0, var lanes: Int = 1)
 
     @Composable
-    private fun Content(offset: Int) {
+    @Suppress("UNUSED_PARAMETER")   // version: a new value means new data on disk
+    private fun Content(offset: Int, version: Int) {
         val context = LocalContext.current
         val size = LocalSize.current
         val cal = Store.read(context, Store.CALENDAR)?.let { runCatching { parseCalendar(it) }.getOrNull() }
