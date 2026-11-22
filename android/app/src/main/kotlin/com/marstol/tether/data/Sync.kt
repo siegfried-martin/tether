@@ -24,6 +24,7 @@ import com.marstol.tether.widget.DATA_VERSION
 import com.marstol.tether.widget.DayWidget
 import com.marstol.tether.widget.TAG_ID
 import com.marstol.tether.widget.TasksWidget
+import com.marstol.tether.widget.WidgetData
 import java.io.IOException
 import java.time.LocalDate
 import java.time.ZoneId
@@ -93,6 +94,8 @@ object Sync {
     }
 
     suspend fun redraw(context: Context) {
+        WidgetData.version.value += 1
+        Log.d(TAG, "redraw v=${WidgetData.version.value}")
         val manager = GlanceAppWidgetManager(context)
         for (widget in listOf(TasksWidget(), AgendaWidget(), DayWidget())) {
             for (id in manager.getGlanceIds(widget.javaClass)) {

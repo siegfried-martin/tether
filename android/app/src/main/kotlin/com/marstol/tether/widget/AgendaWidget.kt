@@ -42,7 +42,7 @@ import java.time.format.FormatStyle
 /** The coming week, day by day: today always, other days when they have something on. */
 class AgendaWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        provideContent { Content(currentState<Preferences>()[DATA_VERSION] ?: 0) }
+        provideContent { Content(WidgetData.current(currentState<Preferences>()[DATA_VERSION])) }
     }
 
     private sealed interface Line {

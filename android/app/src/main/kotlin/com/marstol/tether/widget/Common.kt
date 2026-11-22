@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +57,21 @@ val TAG_ID = intPreferencesKey("tag_id")
 val DAY_OFFSET = intPreferencesKey("day_offset")
 /** Bumped on every sync: widgets read their data from files, so this is what makes them redraw. */
 val DATA_VERSION = intPreferencesKey("data_version")
+
+/**
+ * New data on disk, as a live signal. A running widget session collects it, so a sync
+ * redraws open widgets at once; DATA_VERSION covers widgets whose session has closed.
+ */
+object WidgetData {
+    val version = MutableStateFlow(0)
+
+    /** The data version a widget should draw: changes whenever either signal does. */
+    @Composable
+    fun current(stored: Int?): Int {
+        val live by version.collectAsState()
+        return live * 100_000 + (stored ?: 0)
+    }
+}
 
 private const val LAUNCHER = "com.google.androidbrowserhelper.trusted.LauncherActivity"
 

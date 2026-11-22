@@ -54,7 +54,7 @@ class TasksWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val state = currentState<Preferences>()
-            Content(state[TAG_ID], state[DATA_VERSION] ?: 0)
+            Content(state[TAG_ID], WidgetData.current(state[DATA_VERSION]))
         }
     }
 

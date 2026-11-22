@@ -59,7 +59,7 @@ class DayWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val state = currentState<Preferences>()
-            Content(state[DAY_OFFSET] ?: 0, state[DATA_VERSION] ?: 0)
+            Content(state[DAY_OFFSET] ?: 0, WidgetData.current(state[DATA_VERSION]))
         }
     }
 
