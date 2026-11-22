@@ -75,7 +75,7 @@ object WidgetData {
     }
 }
 
-private const val LAUNCHER = "com.google.androidbrowserhelper.trusted.LauncherActivity"
+private const val LAUNCHER = "com.marstol.tether.TetherLauncherActivity"
 
 /** Opens a Tether page (a path such as /tasks?task=12) in the app. */
 fun openInApp(context: Context, path: String): Action = actionStartActivity(

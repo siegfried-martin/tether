@@ -22,8 +22,10 @@
         <!-- The app's half of Digital Asset Links; the site's half is /.well-known/assetlinks.json. -->
         <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />
 
+        <!-- The library's launcher, subclassed to sync the widgets when the app leaves the screen.
+             Its settings are read from this activity's meta-data. -->
         <activity
-            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:name=".TetherLauncherActivity"
             android:exported="true"
             android:label="@string/app_name">
             <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL"
@@ -40,11 +42,6 @@
             <meta-data android:name="android.support.customtabs.trusted.FALLBACK_TYPE"
                 android:value="customtabs" />
 
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
             <!-- Tether's pages open in the app. Sign-in and OAuth paths are left out on purpose,
                  so the browser keeps them and logins finish where they started. -->
             <intent-filter android:autoVerify="true">
@@ -58,6 +55,19 @@
                 <data android:pathPrefix="/settings" />
             </intent-filter>
         </activity>
+
+        <!-- The launcher icon, under the activity's old name: home-screen shortcuts made
+             before the subclass point at this name and keep working. -->
+        <activity-alias
+            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:targetActivity=".TetherLauncherActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- "Manage space" in the app's storage settings, and the site-settings shortcut the
              launcher adds: both open Chrome's data for the site. The launcher crashes without it. -->
