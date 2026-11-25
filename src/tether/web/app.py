@@ -35,8 +35,8 @@ from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import CalendarPoller, GmailPoller
-from tether.services import (accounts, calendar, digest, items, mail, mcp_auth, overview, sync_state, tasks, triage,
-                             widget)
+from tether.services import (accounts, calendar, digest, invite, items, mail, mcp_auth, overview, sync_state, tasks,
+                             triage, widget)
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +81,10 @@ class SourceUpdate(BaseModel):
 
 class HoldRelease(BaseModel):
     action: str
+
+
+class InviteResponse(BaseModel):
+    response: str   # accepted, tentative or declined
 
 
 class EventCreate(BaseModel):
@@ -317,6 +321,27 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
     async def item_thread(item_id: int, request: Request, _: str = Depends(require_user)):
         with user_errors():
             return await mail.get_item_thread(request.app.state.conn, request.app.state.gmail_clients, item_id)
+
+    @app.get("/api/items/{item_id}/invite")
+    async def item_invite(item_id: int, request: Request, _: str = Depends(require_user)):
+        state = request.app.state
+        with user_errors():
+            return {"invite": await invite.get_invite(state.conn, state.gmail_clients, state.calendar.client,
+                                                      item_id, settings.tz)}
+
+    @app.post("/api/items/{item_id}/invite/respond")
+    async def respond_invite(item_id: int, body: InviteResponse, request: Request, _: str = Depends(require_user)):
+        state = request.app.state
+        with user_errors():
+            view, source_id = await invite.respond(state.conn, state.gmail_clients, state.calendar.client,
+                                                   item_id, body.response, settings.tz)
+        if source_id is not None:   # so the agenda shows the answer (a declined event leaves it)
+            try:
+                await asyncio.wait_for(state.calendar.refresh_source(source_id), timeout=15)
+            except Exception as exc:  # answered in Google; the next cycle picks it up
+                log.info("calendar source %s: refresh after answer failed: %s", source_id, type(exc).__name__)
+            state.calendar.wake()
+        return {"invite": view}
 
     async def _triage(request: Request, action, item_id: int) -> dict:
         with user_errors():

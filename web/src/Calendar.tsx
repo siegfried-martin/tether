@@ -8,11 +8,11 @@ import { navigate, withParams, type Location } from './route'
 // ------------------------------------------------------------------ dates
 
 /** Local calendar dates as YYYY-MM-DD; noon avoids daylight-saving edges. */
-function isoDay(d: Date): string {
+export function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 const noon = (iso: string) => new Date(`${iso}T12:00:00`)
-function plusDays(iso: string, n: number): string {
+export function plusDays(iso: string, n: number): string {
   const d = noon(iso)
   d.setDate(d.getDate() + n)
   return isoDay(d)
@@ -25,7 +25,7 @@ function dayOf(e: AgendaEvent): string {
   return e.all_day ? e.start : isoDay(new Date(e.start))
 }
 
-const clock = (iso: string | Date) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+export const clock = (iso: string | Date) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
 function timeRange(e: AgendaEvent): string {
   if (e.all_day) {
@@ -255,7 +255,7 @@ function EventRow({ event: e }: { event: AgendaEvent }) {
 }
 
 /** An event takes its first calendar's color; a second calendar shows as a stripe on the right. */
-function eventStyle(e: AgendaEvent): React.CSSProperties {
+export function eventStyle(e: AgendaEvent): React.CSSProperties {
   const style = accountStyle(e.sources[0]?.color) as Record<string, string>
   if (e.sources[1]) style['--acct2'] = e.sources[1].color
   return style as React.CSSProperties
@@ -263,13 +263,13 @@ function eventStyle(e: AgendaEvent): React.CSSProperties {
 
 // ------------------------------------------------------------------ time grid
 
-const HOUR = 48                     // px per hour
+export const HOUR = 48                     // px per hour
 const MIN_MINUTES = 20              // shortest an event is drawn
 
 type Placed = { event: AgendaEvent; top: number; bottom: number; col: number; cols: number }
 
 /** Timed events of one day, clipped to it and laid out side by side where they overlap. */
-function layoutDay(day: string, events: AgendaEvent[]): Placed[] {
+export function layoutDay(day: string, events: AgendaEvent[]): Placed[] {
   const start = midnight(day).getTime(), end = midnight(plusDays(day, 1)).getTime()
   const segs = events
     .map((event) => {

@@ -103,6 +103,32 @@ class CalendarClient(GoogleClient):
             resp.raise_for_status()
 
 
+    async def find_by_uid(self, calendar_id: str, ical_uid: str) -> list[dict]:
+        """Events with this iCalendar UID: a series' master and its changed occurrences, or one event."""
+        resp = await self._get(f"{self._cal(calendar_id)}/events", {"iCalUID": ical_uid, "showDeleted": "true"})
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
+    async def get_event(self, calendar_id: str, event_id: str) -> dict | None:
+        resp = await self._get(f"{self._cal(calendar_id)}/events/{quote(event_id, safe='')}")
+        if resp.status_code in (400, 404, 410):
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def respond(self, calendar_id: str, event_id: str, email: str, response: str) -> dict:
+        """Set this calendar's owner's answer to an invite. attendeesOmitted leaves the other guests
+        as they are; sendUpdates=all has Google email the organizer, as answering in Gmail does."""
+        resp = await self._request("PATCH", f"{self._cal(calendar_id)}/events/{quote(event_id, safe='')}",
+                                   params={"sendUpdates": "all"},
+                                   json={"attendeesOmitted": True,
+                                         "attendees": [{"email": email, "responseStatus": response}]})
+        resp.raise_for_status()
+        return resp.json()
+
+
 def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
     """One events.list item as an Instance, or None when it should not reach the hub."""
     if event.get("status") == "cancelled" or event.get("eventType") in SKIPPED_TYPES:

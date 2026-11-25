@@ -59,7 +59,32 @@ export type ThreadMessage = {
   attachments: { name: string; size: number; type: string }[]
 }
 
-export type Thread = { account: string; subject: string; item_id: number | null; messages: ThreadMessage[] }
+export type Thread = {
+  account: string; subject: string; item_id: number | null; invite?: boolean; messages: ThreadMessage[]
+}
+
+export type InviteAnswer = 'accepted' | 'tentative' | 'declined'
+
+/** A calendar invitation found in an email thread (GET /api/items/{id}/invite). */
+export type Invite = {
+  method: string
+  title: string
+  start: string
+  end: string
+  all_day: boolean
+  location: string | null
+  organizer: string | null
+  organizer_email: string | null
+  recurring: boolean
+  guests: number
+  cancelled: boolean
+  reply: { who: string; response: string | null } | null
+  account: string
+  on_calendar: boolean
+  response: InviteAnswer | 'needsAction' | null
+  can_respond: boolean
+  calendar_url: string | null
+}
 
 export type Alert = { kind: string; account: string; message: string }
 

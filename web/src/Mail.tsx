@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, type Item, type Thread, type ThreadMessage } from './api'
+import { InviteCard } from './Invite'
 import { DueLabel, errorText, Linkified } from './shared'
 
 export const ExternalIcon = () => (
@@ -48,6 +49,7 @@ function ThreadView({ itemId }: { itemId: number }) {
   if (!thread) return <p className="muted">Loading…</p>
   return (
     <div className="thread">
+      {thread.invite && <InviteCard itemId={itemId} />}
       {thread.messages.length > 1 && <h3 className="thread-subject">{thread.subject} <span className="muted">· {thread.messages.length} messages</span></h3>}
       {thread.messages.map((m, n) => <Message key={n} message={m} startOpen={n === thread.messages.length - 1} />)}
     </div>

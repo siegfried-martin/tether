@@ -707,3 +707,56 @@ main.calendar-page:not(.view-schedule) .cal-swipe { flex: 1; min-height: 0; disp
 .policy-links { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.88rem; padding: 8px 0 16px; }
 .policy-links a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
 .center .policy-links { justify-content: center; }
+
+/* Calendar invite card in the reading pane */
+.invite {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 12px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+}
+.invite.cancelled { border-left-color: var(--urgent-text); }
+.invite.cancelled .invite-title { text-decoration: line-through; }
+.invite-head { display: flex; gap: 10px; align-items: flex-start; }
+.invite-icon { color: var(--accent); flex: none; margin-top: 2px; }
+.invite-what { min-width: 0; display: grid; gap: 2px; }
+.invite-title { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.invite-when { font-weight: 600; }
+.invite-where, .invite-meta { font-size: 0.875rem; overflow-wrap: anywhere; }
+.invite-day {
+  position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.invite-day.loading { height: 96px; }
+.invite-day .cal-col { border-left: 1px solid var(--border); }
+.invite-day .slot { cursor: default; }
+.invite-day.list { display: block; padding: 8px 10px; }
+.invite-day.list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.invite-day.list li { padding: 3px 8px; border-radius: 4px; font-size: 0.875rem; overflow-wrap: anywhere; }
+.invite-list-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.invite-allday { display: flex; flex-wrap: wrap; gap: 4px; }
+.invite-allday span { font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; border-left-width: 4px; }
+.slot.invite-slot {
+  --acct: var(--accent); z-index: 1;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, var(--bg)) 0 8px,
+                                        color-mix(in srgb, var(--accent) 20%, var(--bg)) 8px 16px);
+  border: 1px solid var(--accent); border-left: 4px solid var(--accent);
+}
+.slot.invite-slot .slot-title { font-weight: 700; }
+.invite-clash { margin: 0; font-size: 0.875rem; color: var(--urgent-text); }
+.invite-status { margin: 0; font-size: 0.875rem; }
+.invite-answer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.invite-ask { font-weight: 600; }
+.invite-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; min-width: 220px; max-width: 360px; }
+.invite-button {
+  font: inherit; font-weight: 600; padding: 8px 6px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.invite-button + .invite-button { border-left: 0; }
+.invite-button:first-child { border-radius: 6px 0 0 6px; }
+.invite-button:last-child { border-radius: 0 6px 6px 0; }
+.invite-button:hover:not(:disabled) { background: var(--surface); }
+.invite-button:disabled { cursor: default; opacity: 0.7; }
+.invite-button.chosen { opacity: 1; color: #fff; }
+.invite-button.accepted.chosen { background: #2e7a50; border-color: #2e7a50; }
+.invite-button.tentative.chosen { background: #8a6a12; border-color: #8a6a12; }
+.invite-button.declined.chosen { background: #a8071a; border-color: #a8071a; }
+.invite-link { color: var(--accent); font-weight: 600; font-size: 0.875rem; justify-self: start; }

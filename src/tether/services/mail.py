@@ -138,7 +138,18 @@ def thread_text(thread: dict, *, body_cap: int = BODY_CAP) -> dict:
         })
     subject = next((h["value"] for h in (messages[0].get("payload", {}).get("headers", []) if messages else [])
                     if h["name"].lower() == "subject"), "")
-    return {"subject": subject or "(no subject)", "messages": out}
+    invite = any(calendar_parts(m.get("payload", {})) for m in messages)
+    return {"subject": subject or "(no subject)", "invite": invite, "messages": out}
+
+
+INVITE_TYPES = {"text/calendar", "application/ics"}
+
+
+def calendar_parts(payload: dict) -> list[dict]:
+    """A message's calendar invite parts, the inline text/calendar first (it carries METHOD)."""
+    found = [p for p in _parts(payload) if p.get("mimeType", "").lower() in INVITE_TYPES
+             or p.get("filename", "").lower().endswith(".ics")]
+    return sorted(found, key=lambda p: p.get("mimeType", "").lower() != "text/calendar")
 
 
 def _parts(payload: dict):
