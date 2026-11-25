@@ -33,7 +33,10 @@ function statusLine(inv: Invite): string | null {
     const said = { accepted: 'accepted', tentative: 'said maybe', declined: 'declined' }[inv.reply.response ?? '']
     return `${inv.reply.who} ${said ?? 'replied'}.`
   }
-  if (!inv.on_calendar) return `Not on ${inv.account}'s calendar. Open the email in Gmail to answer.`
+  if (!inv.on_calendar) {
+    return inv.method === 'REQUEST' ? `Not on ${inv.account}'s calendar. Open the email in Gmail to answer.`
+      : `Not on ${inv.account}'s calendar.`   // PUBLISH: a booking or ticket's "add to calendar" file
+  }
   if (!inv.can_respond) return null
   return inv.response === 'needsAction' || !inv.response ? "You haven't answered yet." : null
 }
