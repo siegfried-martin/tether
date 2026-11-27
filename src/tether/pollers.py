@@ -219,7 +219,8 @@ class CalendarPoller:
                     return False
                 cursor = None
                 raw = await self.client(account_id).list_events(source["external_ref"], window.start, window.end)
-                instances = [i for i in (gcal.to_instance(e, self.settings.tz) for e in raw) if i]
+                instances = [i for i in (gcal.to_instance(e, self.settings.tz, source["default_reminders"]) for e in raw)
+                             if i]
             stats = calendar.apply_fetch(self.conn, source["id"], instances, window=window, now=now)
             sync_state.record_ok(self.conn, account_id, name, cursor)
             return any(stats.values())

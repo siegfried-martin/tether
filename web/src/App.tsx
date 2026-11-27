@@ -5,6 +5,7 @@ import { CalendarPage, CalendarSettings } from './Calendar'
 import { TagSettings, TasksPage } from './Tasks'
 import { ExternalIcon, externalName, ReadingPane } from './Mail'
 import { InstallBanner } from './Install'
+import { NotificationSettings, useNotifications } from './Notifications'
 import { lastLocation, linkProps, navigate, pageOf, useLocation, withParams, type Location, type Page } from './route'
 
 const NAV = [['inbox', 'Inbox'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['settings', 'Settings']] as const
@@ -52,6 +53,7 @@ export default function App() {
         {page && <PageCarousel page={page} />}
       </header>
       <InstallBanner />
+      <NotificationBridge />
       {page === 'settings' ? <Settings onSignedOut={() => setMe(null)} />
         : page === 'tasks' ? <TasksPage loc={loc} />
         : page === 'calendar' ? <CalendarPage loc={loc} barSlot={barSlot} />
@@ -311,6 +313,11 @@ function ItemRow({ item, open, onToggle, onAction, onTask }: {
   )
 }
 
+function NotificationBridge() {
+  useNotifications()
+  return null
+}
+
 function Settings({ onSignedOut }: { onSignedOut: () => void }) {
   const accounts = usePolling<Account[]>('/api/accounts')
   const sync = usePolling<SyncRow[]>('/api/sync-status')
@@ -325,6 +332,7 @@ function Settings({ onSignedOut }: { onSignedOut: () => void }) {
         {accounts.data?.length === 0 && <p className="muted">No accounts yet.</p>}
         <a className="button" href="/accounts/google/connect">Connect a Google account</a>
       </section>
+      <NotificationSettings />
       <CalendarSettings />
       <TagSettings />
       <DigestPanel onIngested={accounts.reload} />

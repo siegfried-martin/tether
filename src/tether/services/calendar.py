@@ -82,7 +82,8 @@ HUB_STREAM = "calendar.hub"
 def list_sources(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """SELECT s.id, s.kind, s.external_ref, s.name, s.enabled, s.access_role, s.is_primary,
-                  a.id AS account_id, a.label AS account, a.color AS account_color, a.status AS account_status,
+                  s.default_reminders, a.id AS account_id, a.label AS account, a.color AS account_color,
+                  a.status AS account_status,
                   (SELECT COUNT(*) FROM source_event e WHERE e.source_id = s.id) AS events,
                   (SELECT COUNT(*) FROM source_event e WHERE e.source_id = s.id AND e.missing_since IS NOT NULL)
                     AS held
@@ -111,14 +112,16 @@ def sync_calendar_list(conn: sqlite3.Connection, account_id: int, calendars: lis
                                     "AND external_ref = ?", (account_id, cal["id"])).fetchone()
             name = cal.get("summaryOverride") or cal.get("summary") or cal["id"]
             role, primary = cal.get("accessRole"), int(bool(cal.get("primary")))
+            defaults = gcal.default_reminders(cal)
             if existing is None:
                 enabled = bool(primary) and role == "owner" and not is_hub
                 conn.execute("INSERT INTO calendar_source (account_id, kind, external_ref, name, enabled, access_role, "
-                             "is_primary) VALUES (?, 'google', ?, ?, ?, ?, ?)",
-                             (account_id, cal["id"], name, int(enabled), role, primary))
+                             "is_primary, default_reminders) VALUES (?, 'google', ?, ?, ?, ?, ?, ?)",
+                             (account_id, cal["id"], name, int(enabled), role, primary, defaults))
             else:
                 conn.execute("UPDATE calendar_source SET name = ?, enabled = enabled AND ?, access_role = ?, "
-                             "is_primary = ? WHERE id = ?", (name, int(not is_hub), role, primary, existing["id"]))
+                             "is_primary = ?, default_reminders = ? WHERE id = ?",
+                             (name, int(not is_hub), role, primary, defaults, existing["id"]))
 
 
 def ensure_ics_source(conn: sqlite3.Connection, label: str) -> int:
@@ -195,8 +198,8 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
                 conn.execute(
                     """INSERT INTO source_event (source_id, uid, instance_start, start, "end", all_day, title,
                            location, description, modified_at, content_hash, busy, external_id, series_id,
-                           organizer_self, guests)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           organizer_self, guests, reminders)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (source_id, inst.uid, inst.instance_start, inst.start, inst.end, int(inst.all_day), inst.title,
                      inst.location, inst.description, inst.modified_at, digest, inst.busy, *_google_ids(inst)))
                 stats["added"] += 1
@@ -215,9 +218,9 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
                         log.info("source %s: change seen %.0f min after it was made", source_id, lag)
             ids = _google_ids(inst)
             if tuple(row[c] for c in GOOGLE_ID_COLUMNS) != ids:
-                # Bookkeeping for deletes only: the hub content is unchanged, so not counted as a change.
+                # Bookkeeping for deletes and notifications: the hub content is unchanged, so not a change.
                 conn.execute("UPDATE source_event SET external_id = ?, series_id = ?, organizer_self = ?, "
-                             "guests = ? WHERE id = ?", (*ids, row["id"]))
+                             "guests = ?, reminders = ? WHERE id = ?", (*ids, row["id"]))
 
         absent = [r for k, r in existing.items() if k not in fetched]
         aged = [r for r in absent if window.starts_before(r["start"], bool(r["all_day"]))]
@@ -244,11 +247,11 @@ def apply_fetch(conn: sqlite3.Connection, source_id: int, instances: list[Instan
     return stats
 
 
-GOOGLE_ID_COLUMNS = ("external_id", "series_id", "organizer_self", "guests")
+GOOGLE_ID_COLUMNS = ("external_id", "series_id", "organizer_self", "guests", "reminders")
 
 
 def _google_ids(inst: Instance) -> tuple:
-    return inst.external_id, inst.series_id, int(inst.organizer_self), inst.guests
+    return inst.external_id, inst.series_id, int(inst.organizer_self), inst.guests, inst.reminders
 
 
 def _delete_source_rows(conn: sqlite3.Connection, ids: list[int]) -> None:

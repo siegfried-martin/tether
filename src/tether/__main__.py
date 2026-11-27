@@ -2,11 +2,12 @@
 
     python -m tether serve [--reload]   run the app (one worker, always)
     python -m tether keygen             print a new encryption key
+    python -m tether vapid-key          print a new Web Push (VAPID) private key
 """
 
 import sys
 
-USAGE = "usage: python -m tether serve [--reload] | keygen"
+USAGE = "usage: python -m tether serve [--reload] | keygen | vapid-key"
 
 
 def serve(reload: bool) -> None:
@@ -36,6 +37,10 @@ def main() -> None:
         from tether.crypto import generate_key
 
         print(generate_key())
+    elif args == ["vapid-key"]:
+        from tether.connectors.webpush import Vapid
+
+        print(Vapid.generate())
     elif args and args[0] == "serve" and set(args[1:]) <= {"--reload"}:
         serve(reload="--reload" in args)
     else:

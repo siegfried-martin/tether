@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     calendar_google_minutes: int = 5
     calendar_ics_minutes: int = 15
 
+    # Web Push (notifications): the server's VAPID private key, raw 32 bytes in base64url.
+    # Make one with `python -m tether vapid-key`. Unset, notifications are off.
+    vapid_private_key: str | None = None
+    # Who push services can contact about this server: an https: or mailto: URI (default: base_url).
+    vapid_contact: str | None = None
+
     initial_sync_days: int = 14
     gmail_poll_seconds: int = 60
 
@@ -93,6 +99,10 @@ class Settings(BaseSettings):
     def app_redirect_uri(self) -> str:
         """Where sign-in codes for the Android app go: the app's own URL scheme (RFC 8252)."""
         return f"{self.android_package}:/oauth2redirect"
+
+    @property
+    def vapid_subject(self) -> str:
+        return self.vapid_contact or self.base_url
 
     @property
     def secure_cookies(self) -> bool:

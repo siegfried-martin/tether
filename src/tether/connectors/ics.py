@@ -16,7 +16,7 @@ import httpx
 import icalendar
 import recurring_ical_events
 
-from tether.connectors.events import Instance, Window, fmt
+from tether.connectors.events import Instance, Window, fmt, reminder_text
 
 # Outlook's free/busy field; the only place it says whether an invite was accepted.
 BUSY_STATUS = {"BUSY": "busy", "TENTATIVE": "tentative", "FREE": "free", "OOF": "oof", "WORKINGELSEWHERE": "busy"}
@@ -89,7 +89,24 @@ def _instance(ev, tz: ZoneInfo) -> Instance | None:
         description=_text(ev.get("DESCRIPTION")) or None,
         modified_at=fmt(modified.dt, tz) if modified is not None and isinstance(modified.dt, (datetime, date)) else None,
         busy=busy,
+        reminders=_alarms(ev, start_value),
     )
+
+
+def _alarms(ev, start) -> str | None:
+    """Minutes before start of the event's VALARMs, or None when it has none."""
+    alarms = [c for c in ev.subcomponents if c.name == "VALARM" and c.get("TRIGGER") is not None]
+    if not alarms:
+        return None
+    minutes = []
+    for alarm in alarms:
+        trigger = alarm.decoded("TRIGGER")
+        if isinstance(trigger, timedelta):
+            if str(alarm["TRIGGER"].params.get("RELATED", "START")).upper() == "START":
+                minutes.append(round(-trigger.total_seconds() / 60))
+        elif isinstance(trigger, datetime) and isinstance(start, datetime) and trigger.tzinfo and start.tzinfo:
+            minutes.append(round((start - trigger).total_seconds() / 60))
+    return reminder_text(minutes) or None
 
 
 def _text(value) -> str:

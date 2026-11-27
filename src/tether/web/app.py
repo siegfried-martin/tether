@@ -35,8 +35,8 @@ from tether.crypto import Vault
 from tether.mcp_server import server as mcp
 from tether.mcp_server.provider import CONSENT_PATH
 from tether.pollers import CalendarPoller, GmailPoller
-from tether.services import (accounts, calendar, digest, invite, items, mail, mcp_auth, overview, sync_state, tasks,
-                             triage, widget)
+from tether.services import (accounts, calendar, digest, invite, items, mail, mcp_auth, notify, overview, sync_state,
+                             tasks, triage, widget)
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +129,24 @@ class TaskMove(BaseModel):
     after: int | None = None
 
 
+class PushKeys(BaseModel):
+    p256dh: str = Field(max_length=200)
+    auth: str = Field(max_length=100)
+
+
+class PushSubscription(BaseModel):
+    """A browser's PushSubscription (its toJSON()), plus this device's choices."""
+    endpoint: str = Field(max_length=1000)
+    keys: PushKeys
+    mail: bool | None = None
+    events: bool | None = None
+    replaces: str | None = Field(default=None, max_length=1000)
+
+
+class PushDevice(BaseModel):
+    endpoint: str = Field(max_length=1000)
+
+
 USER_ERRORS = (triage.TriageError, tasks.TaskError, mail.MailError, digest.DigestError, calendar.CalendarError,
                widget.WidgetError)
 
@@ -160,8 +178,10 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
         app.state.gmail_clients = GmailClients(app.state.http, app.state.conn, app.state.vault,
                                                settings.google_client_id, settings.google_client_secret)
         app.state.calendar = CalendarPoller(app.state.conn, app.state.vault, app.state.http, settings)
+        app.state.notifier = notify.Notifier(app.state.conn, app.state.http, settings)
         tasks = [asyncio.create_task(app.state.gmail.run_forever()),
-                 asyncio.create_task(app.state.calendar.run_forever())] if start_pollers else []
+                 asyncio.create_task(app.state.calendar.run_forever()),
+                 asyncio.create_task(app.state.notifier.run_forever())] if start_pollers else []
         try:
             async with mcp_server.session_manager.run():
                 yield
@@ -524,6 +544,38 @@ def create_app(settings: Settings, *, conn: sqlite3.Connection | None = None, st
             return etagged(request, widget.widget_calendar(conn, first, days, zone, today))
 
     # --------------------------------------------------------- connections
+
+    # Notifications. A device is named by its push endpoint, which only that browser knows.
+    @app.get("/api/push")
+    async def push_config(request: Request, _: str = Depends(require_user)):
+        vapid = request.app.state.notifier.vapid
+        return {"key": vapid.public_key if vapid else None, "default_minutes": notify.DEFAULT_REMINDER}
+
+    @app.post("/api/push/subscription")
+    async def push_subscribe(body: PushSubscription, request: Request, _: str = Depends(require_user)):
+        try:
+            prefs = notify.save_subscription(request.app.state.conn, body.endpoint, body.keys.p256dh, body.keys.auth,
+                                             mail=body.mail, events=body.events, replaces=body.replaces)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        request.app.state.notifier.wake()
+        return {"device": prefs}
+
+    @app.post("/api/push/device")
+    async def push_device(body: PushDevice, request: Request, _: str = Depends(require_user)):
+        """This device's choices, or null when the server doesn't know it."""
+        return {"device": notify.get_subscription(request.app.state.conn, body.endpoint)}
+
+    @app.post("/api/push/unsubscribe", status_code=204)
+    async def push_unsubscribe(body: PushDevice, request: Request, _: str = Depends(require_user)):
+        notify.delete_subscription(request.app.state.conn, body.endpoint)
+
+    @app.post("/api/push/test")
+    async def push_test(body: PushDevice, request: Request, _: str = Depends(require_user)):
+        if not await request.app.state.notifier.test(body.endpoint):
+            raise HTTPException(502, "The push service didn't take the test notification. Turn notifications "
+                                     "off and on again on this device.")
+        return {"sent": True}
 
     @app.get("/api/connections")
     async def list_connections(_: str = Depends(require_session), conn: sqlite3.Connection = Depends(conn_dep)):

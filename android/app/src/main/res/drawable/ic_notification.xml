@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon for Tether's notifications: the launcher glyph, white on transparent
+     (Android colors it). Named in the DelegationService's SMALL_ICON meta-data. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="512" android:viewportHeight="512">
+    <group android:pivotX="256" android:pivotY="256" android:scaleX="1.05" android:scaleY="1.05" android:rotation="-45">
+        <path android:strokeColor="#FFFFFF" android:strokeWidth="44" android:strokeLineCap="round"
+            android:pathData="M276,220C380,170 460,196 460,256S380,342 276,292M236,220C132,170 52,196 52,256S132,342 236,292" />
+        <path android:strokeColor="#FFFFFF" android:strokeWidth="46" android:strokeLineCap="round"
+            android:pathData="M229,172V340M283,172V340" />
+    </group>
+</vector>

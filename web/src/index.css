@@ -184,6 +184,8 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 .days input[aria-invalid="true"] { border-color: var(--urgent-text); }
 .hint { margin: 0; color: var(--muted); font-size: 0.875rem; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.notify { display: grid; gap: 12px; justify-items: start; }
+.notify h2, .notify p { margin: 0; }
 .button:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 480px) { .sync-panel { margin-left: 0; } }
 .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

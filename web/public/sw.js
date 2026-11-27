@@ -1,4 +1,4 @@
-// Tether service worker: caches the app shell only, never API responses.
+// Tether service worker: caches the app shell only, never API responses, and shows notifications.
 const CACHE = 'tether-shell-v2'
 const NEVER = ['/api/', '/auth/', '/accounts/']
 
@@ -51,4 +51,46 @@ self.addEventListener('fetch', (event) => {
       ),
     )
   }
+})
+
+// Notifications. The server sends {title, body, tag, url, ts}, encrypted for this device.
+self.addEventListener('push', (event) => {
+  let data = {}
+  try { data = event.data ? event.data.json() : {} } catch { data = { body: event.data && event.data.text() } }
+  event.waitUntil(self.registration.showNotification(data.title || 'Tether', {
+    body: data.body || '',
+    tag: data.tag,
+    renotify: Boolean(data.tag),    // a newer message in the same thread still alerts
+    timestamp: data.ts,
+    icon: '/icon-192.png',
+    data: { url: data.url || '/' },
+  }))
+})
+
+// A tap opens the page it points at: in the open app when there is one, else a new window.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = new URL(event.notification.data?.url || '/', self.location.origin)
+  event.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const client = open.find((c) => new URL(c.url).origin === url.origin)
+    if (client) {
+      client.postMessage({ type: 'open', url: url.pathname + url.search })
+      return client.focus()
+    }
+    return self.clients.openWindow(url.href)
+  })())
+})
+
+// The browser renewed this device's push subscription: give the server the new one.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    const old = event.oldSubscription
+    const sub = event.newSubscription || (old && await self.registration.pushManager.subscribe(old.options))
+    if (!sub) return
+    await fetch('/api/push/subscription', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...sub.toJSON(), replaces: old ? old.endpoint : null }),
+    })
+  })())
 })

@@ -10,7 +10,7 @@ from typing import Protocol
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from tether.connectors.events import Instance, fmt
+from tether.connectors.events import Instance, fmt, reminder_text
 from tether.connectors.google_api import GoogleClient
 from tether.db import iso, parse_iso
 
@@ -129,8 +129,29 @@ class CalendarClient(GoogleClient):
         return resp.json()
 
 
-def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
-    """One events.list item as an Instance, or None when it should not reach the hub."""
+def reminders(entries: list[dict] | None) -> str:
+    """Google reminders ({method, minutes}) as stored. Pop-ups are the notifications; when there
+    are only emails, their times stand in."""
+    entries = entries or []
+    popups = [e for e in entries if e.get("method") == "popup"]
+    return reminder_text(e.get("minutes") for e in (popups or entries))
+
+
+def default_reminders(calendar: dict) -> str | None:
+    """A calendar list entry's default notifications, or None when it has none."""
+    return reminders(calendar.get("defaultReminders")) or None
+
+
+def _event_reminders(event: dict, defaults: str | None) -> str | None:
+    r = event.get("reminders")
+    if not r or r.get("useDefault"):
+        return defaults
+    return reminders(r.get("overrides"))
+
+
+def to_instance(event: dict, tz: ZoneInfo, defaults: str | None = None) -> Instance | None:
+    """One events.list item as an Instance, or None when it should not reach the hub.
+    defaults: the calendar's default notifications, for events that use them."""
     if event.get("status") == "cancelled" or event.get("eventType") in SKIPPED_TYPES:
         return None
     me = next((a for a in event.get("attendees", []) if a.get("self")), None)
@@ -162,6 +183,7 @@ def to_instance(event: dict, tz: ZoneInfo) -> Instance | None:
         series_id=event.get("recurringEventId"),
         organizer_self="organizer" not in event or bool(event["organizer"].get("self")),   # Google omits false
         guests=sum(1 for a in event.get("attendees", []) if not a.get("self") and not a.get("resource")),
+        reminders=_event_reminders(event, defaults),
     )
 
 

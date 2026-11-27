@@ -34,6 +34,8 @@ class Instance:
     series_id: str | None = None        # the repeating series' event ID
     organizer_self: bool = True         # the calendar's owner organizes it
     guests: int = 0                     # other people invited
+    # Minutes before start the event's own notifications fire ("10,30"); "" none; None unknown.
+    reminders: str | None = None
 
     @property
     def key(self) -> str:
@@ -76,6 +78,11 @@ def fmt(value: date | datetime, tz: ZoneInfo) -> str:
     if isinstance(value, datetime):
         return iso(value if value.tzinfo else value.replace(tzinfo=tz))
     return value.isoformat()
+
+
+def reminder_text(minutes) -> str:
+    """Reminder minutes as stored: sorted, unique, comma-separated."""
+    return ",".join(str(m) for m in sorted({int(m) for m in minutes if m is not None and int(m) >= 0}))
 
 
 def is_past(start: str, all_day: bool, now: datetime, tz: ZoneInfo) -> bool:

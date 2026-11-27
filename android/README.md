@@ -42,3 +42,10 @@ The key's SHA-256 fingerprint is `TETHER_ANDROID_CERT_SHA256` in
 
 Pages under /inbox, /tasks, /calendar and /settings open in the app. Sign-in
 and OAuth paths stay in the browser on purpose, so a login finishes where it started.
+
+## Notifications
+
+Tether's notifications (new mail, event reminders) are Web Push messages to the
+site; Chrome hands them to this app's `DelegationService`, so they show as
+Tether with `ic_notification`. Android 13+ asks for the notification permission
+when you turn notifications on in Settings (`NotificationPermissionRequestActivity`).
